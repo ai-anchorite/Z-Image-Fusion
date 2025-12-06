@@ -56,9 +56,47 @@ except Exception as e:
     logger.error(f"Failed to initialize ComfyKit: {e}")
     kit = None
 
-# Curated sampler/scheduler lists (known to work well with Z-Image)
-DEFAULT_SAMPLERS = ["res_multistep", "euler", "euler_ancestral", "dpmpp_2m", "dpmpp_2m_sde", "dpmpp_3m_sde"]
-DEFAULT_SCHEDULERS = ["simple", "normal", "karras", "exponential", "sgm_uniform"]
+# Fallback sampler/scheduler lists (used if ComfyUI not available)
+FALLBACK_SAMPLERS = ["euler", "euler_ancestral", "dpmpp_2m", "dpmpp_2m_sde", "dpmpp_3m_sde", "res_multistep"]
+FALLBACK_SCHEDULERS = ["simple", "normal", "karras", "exponential", "sgm_uniform"]
+
+# Preferred defaults (will be selected if available)
+PREFERRED_SAMPLER = "euler"
+PREFERRED_SCHEDULER = "simple"
+
+
+def fetch_comfyui_options() -> dict:
+    """Fetch available samplers and schedulers from ComfyUI's object_info API."""
+    result = {
+        "samplers": FALLBACK_SAMPLERS.copy(),
+        "schedulers": FALLBACK_SCHEDULERS.copy()
+    }
+    
+    if kit is None:
+        return result
+    
+    try:
+        with httpx.Client(timeout=5) as client:
+            response = client.get(f"{kit.comfyui_url}/object_info/KSampler")
+            if response.status_code == 200:
+                data = response.json()
+                ksampler_info = data.get("KSampler", {}).get("input", {}).get("required", {})
+                
+                # Extract sampler names
+                sampler_info = ksampler_info.get("sampler_name", [])
+                if sampler_info and isinstance(sampler_info[0], list):
+                    result["samplers"] = sampler_info[0]
+                
+                # Extract scheduler names
+                scheduler_info = ksampler_info.get("scheduler", [])
+                if scheduler_info and isinstance(scheduler_info[0], list):
+                    result["schedulers"] = scheduler_info[0]
+                    
+                logger.info(f"Loaded {len(result['samplers'])} samplers, {len(result['schedulers'])} schedulers from ComfyUI")
+    except Exception as e:
+        logger.warning(f"Could not fetch ComfyUI options, using fallbacks: {e}")
+    
+    return result
 
 # Default models
 DEFAULT_DIFFUSION = "z_image_turbo_bf16.safetensors"
@@ -362,6 +400,9 @@ async def unload_models() -> str:
 def create_interface() -> gr.Blocks:
     """Create the Gradio interface."""
     models = get_model_choices()
+    comfyui_options = fetch_comfyui_options()
+    samplers = comfyui_options["samplers"]
+    schedulers = comfyui_options["schedulers"]
     
     # CSS fix for textarea scrollbars not appearing on initial content
     css = """
@@ -432,8 +473,8 @@ def create_interface() -> gr.Blocks:
                                     shift = gr.Slider(label="Shift", value=3.0, minimum=1.0, maximum=10.0, step=0.5)
                             with gr.Group():
                                 with gr.Row():
-                                    sampler_name = gr.Dropdown(label="Sampler", choices=DEFAULT_SAMPLERS, value="euler", scale=2)
-                                    scheduler = gr.Dropdown(label="Scheduler", choices=DEFAULT_SCHEDULERS, value="simple", scale=2)
+                                    sampler_name = gr.Dropdown(label="Sampler", choices=samplers, value=PREFERRED_SAMPLER if PREFERRED_SAMPLER in samplers else samplers[0], scale=2)
+                                    scheduler = gr.Dropdown(label="Scheduler", choices=schedulers, value=PREFERRED_SCHEDULER if PREFERRED_SCHEDULER in schedulers else schedulers[0], scale=2)
                             with gr.Row():                                   
                                 seed = gr.Number(label="Seed", value=new_random_seed(), minimum=0, step=1, scale=3)
                                 randomize_seed = gr.Checkbox(label="🎲", value=True, scale=1)

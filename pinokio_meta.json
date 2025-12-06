@@ -1,0 +1,12 @@
+{
+  "links": [{
+    "title": "Anchorite (Project creator)",
+    "links": [{
+      "type": "bitcoin",
+      "value": "bc1qxm7g05cykj7d5ct9shzf7vp4cqgaf7f3670wez"
+    }, {
+      "title": "Github",
+      "value": "https://github.com/ai-anchorite"
+    }]
+  }]
+}
