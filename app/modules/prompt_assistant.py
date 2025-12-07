@@ -268,7 +268,8 @@ class PromptAssistant:
             "model_for_describer": DEFAULT_MODEL_DEFAULTS[0],
             "custom_models": [], # List of user-added repo IDs
             "temperature": 0.7,
-            "max_tokens": 1024
+            "max_tokens": 1024,
+            "keep_model_loaded": False  # Auto-unload after use by default (saves RAM)
         }
 
         if os.path.exists(self.settings_file):
@@ -349,12 +350,31 @@ class PromptAssistant:
 
     # --- Worker Functions (Generators) ---
 
-    def unload_llms(self):
+    def unload_llms(self, silent=False):
+        """
+        Fully unload and delete the LLM model from memory.
+        
+        Args:
+            silent: If True, return empty string (for auto-unload after operations)
+        """
         if self.active_engine:
+            model_name = os.path.basename(self.active_engine.model_path)
+            # Delete all model components explicitly
+            if self.active_engine.model is not None:
+                del self.active_engine.model
+            if self.active_engine.tokenizer is not None:
+                del self.active_engine.tokenizer
+            if self.active_engine.processor is not None:
+                del self.active_engine.processor
             del self.active_engine
             self.active_engine = None
+            # Force garbage collection and clear GPU cache
             safe_empty_cache()
-            return "✅ Memory Cleared"
+            if silent:
+                return ""
+            return f"✅ {model_name} unloaded"
+        if silent:
+            return ""
         return "ℹ️ Nothing to unload"
 
     def _load_engine_generator(self, target_model):
@@ -388,23 +408,40 @@ class PromptAssistant:
         )
         temp = self.settings.get("temperature", 0.7)
         max_tok = self.settings.get("max_tokens", 1024)
+        keep_loaded = self.settings.get("keep_model_loaded", False)
 
+        final_prompt = prompt
+        final_status = ""
+        model_loaded = False  # Track if we successfully loaded a model
+        
         try:
             for status_msg in self._load_engine_generator(target_model):
                 yield prompt, status_msg
             
-            yield prompt, "✨ Enhancing Text..."
-            result = self.active_engine(
-                prompt, system_prompt=sys_prompt, 
-                temperature=temp, max_new_tokens=max_tok
-            )
-            if result.status:
-                yield result.prompt.strip(), "✅ Enhanced Successfully"
+            model_loaded = self.active_engine is not None
+            
+            if not self.active_engine:
+                final_status = "❌ Failed to load model"
             else:
-                yield prompt, f"❌ Failed: {result.message}"
+                yield prompt, "✨ Enhancing Text..."
+                result = self.active_engine(
+                    prompt, system_prompt=sys_prompt, 
+                    temperature=temp, max_new_tokens=max_tok
+                )
+                if result.status:
+                    final_prompt = result.prompt.strip()
+                    final_status = "✅ Enhanced Successfully"
+                else:
+                    final_status = f"❌ Failed: {result.message}"
         except Exception as e:
             traceback.print_exc()
-            yield prompt, f"❌ Error: {str(e)}"
+            final_status = f"❌ Error: {str(e)}"
+        finally:
+            # Auto-unload to free RAM unless user wants to keep model loaded
+            if model_loaded and not keep_loaded:
+                self.unload_llms(silent=True)
+        
+        yield final_prompt, final_status
 
     def describe_image(self, image_path, prompt_context, sys_prompt_override=None):
         if not image_path:
@@ -417,37 +454,53 @@ class PromptAssistant:
         )
         temp = self.settings.get("temperature", 0.7)
         max_tok = self.settings.get("max_tokens", 1024)
+        keep_loaded = self.settings.get("keep_model_loaded", False)
+
+        final_prompt = prompt_context
+        final_status = ""
+        model_loaded = False  # Track if we successfully loaded a model
 
         try:
             for status_msg in self._load_engine_generator(target_model):
                 yield prompt_context, status_msg
-
-            if not self.active_engine.is_vl:
-                yield prompt_context, f"⚠️ Error: '{os.path.basename(target_model)}' is not a Vision Model."
-                return
-
-            trigger = prompt_context if prompt_context and prompt_context.strip() else "Describe this image."
-            yield prompt_context, "👁️ Analyzing Image..."
             
-            result = self.active_engine(
-                trigger, image=image_path, system_prompt=sys_prompt,
-                temperature=temp, max_new_tokens=max_tok
-            )
-            if result.status:
-                yield result.prompt.strip(), "✅ Description Generated"
+            model_loaded = self.active_engine is not None
+
+            if not self.active_engine or not self.active_engine.is_vl:
+                final_status = f"⚠️ Error: '{os.path.basename(target_model)}' is not a Vision Model."
+                # Don't return early - let finally block handle cleanup
             else:
-                yield prompt_context, f"❌ Failed: {result.message}"
+                trigger = prompt_context if prompt_context and prompt_context.strip() else "Describe this image."
+                yield prompt_context, "👁️ Analyzing Image..."
+                
+                result = self.active_engine(
+                    trigger, image=image_path, system_prompt=sys_prompt,
+                    temperature=temp, max_new_tokens=max_tok
+                )
+                if result.status:
+                    final_prompt = result.prompt.strip()
+                    final_status = "✅ Description Generated"
+                else:
+                    final_status = f"❌ Failed: {result.message}"
         except Exception as e:
             traceback.print_exc()
-            yield prompt_context, f"❌ Error: {str(e)}"
+            final_status = f"❌ Error: {str(e)}"
+        finally:
+            # Auto-unload to free RAM unless user wants to keep model loaded
+            # Always unload if model was loaded, regardless of keep_loaded setting on error paths
+            if model_loaded and not keep_loaded:
+                self.unload_llms(silent=True)
+        
+        yield final_prompt, final_status
 
     # --- Settings Logic ---
 
-    def _save_models_and_params(self, enh_model, desc_model, temp, max_tok):
+    def _save_models_and_params(self, enh_model, desc_model, temp, max_tok, keep_loaded):
         self.settings["model_for_enhancer"] = enh_model
         self.settings["model_for_describer"] = desc_model
         self.settings["temperature"] = temp
         self.settings["max_tokens"] = max_tok
+        self.settings["keep_model_loaded"] = keep_loaded
         self._save_to_file()
         return "💾 Settings Saved"
 
@@ -519,6 +572,11 @@ class PromptAssistant:
             with gr.Column(scale=1):
                 temp_slider = gr.Slider(0.0, 2.0, value=self.settings.get("temperature", 0.7), label="Temperature")
                 tok_slider = gr.Slider(64, 4096, step=64, value=self.settings.get("max_tokens", 1024), label="Max Tokens")
+                keep_loaded_cb = gr.Checkbox(
+                    value=self.settings.get("keep_model_loaded", False),
+                    label="Keep Model Loaded",
+                    info="Keep LLM in RAM after use (faster repeat use, but uses more memory)"
+                )
                 
         # --- ADD CUSTOM MODEL ---
         with gr.Row():
@@ -535,7 +593,7 @@ class PromptAssistant:
         
         save_models_btn.click(
             fn=self._save_models_and_params,
-            inputs=[enh_model_dd, desc_model_dd, temp_slider, tok_slider],
+            inputs=[enh_model_dd, desc_model_dd, temp_slider, tok_slider, keep_loaded_cb],
             outputs=[model_stat]
         )
 
