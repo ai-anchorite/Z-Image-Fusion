@@ -14,9 +14,7 @@
     "active_describer": "Detailed Analysis",
     "model_for_enhancer": "Qwen/Qwen3-4B-Instruct-2507",
     "model_for_describer": "Qwen/Qwen3-VL-2B-Instruct",
-    "custom_models": [
-        "huihui-ai/Huihui-Qwen3-VL-4B-Instruct-abliterated"
-    ],
+    "custom_models": [],
     "temperature": 0.7,
     "max_tokens": 2048
 }

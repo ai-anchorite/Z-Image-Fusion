@@ -233,7 +233,9 @@ class QwenPromptExpander:
 DEFAULT_MODEL_DEFAULTS = [
     "Qwen/Qwen3-VL-2B-Instruct",
     "Qwen/Qwen3-4B-Instruct-2507",
-    "thesby/Qwen3-VL-8B-NSFW-Caption-V4.5"
+    "thesby/Qwen3-VL-8B-NSFW-Caption-V4.5",
+    "Goekdeniz-Guelmez/Josiefied-Qwen3-4B-abliterated-v2",
+    "Goekdeniz-Guelmez/Josiefied-Qwen3-VL-4B-Instruct-abliterated-beta-v1"
 ]
 
 DEFAULT_PRESETS = {
