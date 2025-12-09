@@ -787,6 +787,12 @@ def download_all_gguf(progress=gr.Progress()):
     return "\n".join(results)
 
 
+def get_saved_model_defaults() -> dict | None:
+    """Load saved model defaults from ui_settings.json if they exist."""
+    settings = load_ui_settings()
+    return settings.get("model_defaults")
+
+
 def create_interface() -> gr.Blocks:
     """Create the Gradio interface."""
     models = get_model_choices()
@@ -796,8 +802,22 @@ def create_interface() -> gr.Blocks:
     
     # Check installed models to determine startup state
     model_status = check_models_installed()
-    default_gguf_mode = model_status["recommended_mode"]
     show_setup_banner = not model_status["has_any"]
+    
+    # Load saved model defaults, or fall back to auto-detection
+    saved_defaults = get_saved_model_defaults()
+    if saved_defaults:
+        # Use saved preferences
+        default_gguf_mode = saved_defaults.get("use_gguf", model_status["recommended_mode"])
+        default_diffusion = saved_defaults.get("diffusion")
+        default_te = saved_defaults.get("text_encoder")
+        default_vae = saved_defaults.get("vae")
+    else:
+        # Auto-detect based on installed models
+        default_gguf_mode = model_status["recommended_mode"]
+        default_diffusion = None
+        default_te = None
+        default_vae = None
     
     # CSS fix for textarea scrollbars not appearing on initial content
     css = """
@@ -969,16 +989,38 @@ def create_interface() -> gr.Blocks:
                             with gr.Row():
                                 use_gguf = gr.Radio(choices=[("Standard", False), ("GGUF", True)], value=default_gguf_mode, label="Mode", scale=1)
                                 show_all_models = gr.Checkbox(label="Show all", value=False, scale=1, min_width=80, info="Show non-Z-Image models")
+                            
+                            # Compute initial values - use saved defaults if available, else auto-detect
+                            initial_diffusion = get_models_by_mode(DIFFUSION_DIR, default_gguf_mode, DEFAULT_DIFFUSION, DEFAULT_DIFFUSION_GGUF, ZIMAGE_FILTERS["diffusion"])
+                            initial_diffusion_value = default_diffusion if default_diffusion and default_diffusion in initial_diffusion else get_default_model(initial_diffusion, DEFAULT_DIFFUSION_GGUF if default_gguf_mode else DEFAULT_DIFFUSION)
+                            
+                            initial_te = get_models_by_mode(TEXT_ENCODERS_DIR, default_gguf_mode, DEFAULT_TEXT_ENCODER, DEFAULT_TEXT_ENCODER_GGUF, ZIMAGE_FILTERS["text_encoder"])
+                            initial_te_value = default_te if default_te and default_te in initial_te else get_default_model(initial_te, DEFAULT_TEXT_ENCODER_GGUF if default_gguf_mode else DEFAULT_TEXT_ENCODER)
+                            
+                            initial_vae = scan_models(VAE_DIR, (".safetensors",), ZIMAGE_FILTERS["vae"]) or [DEFAULT_VAE]
+                            initial_vae_value = default_vae if default_vae and default_vae in initial_vae else get_default_model(initial_vae, DEFAULT_VAE)
+                            
+                            # Check if initial selections exist on disk
+                            def get_status_icon(folder: Path, filename: str) -> str:
+                                return "✓" if (folder / filename).exists() else "❌"
+                            
+                            initial_diff_status = get_status_icon(DIFFUSION_DIR, initial_diffusion_value) if initial_diffusion_value else "❌"
+                            initial_te_status = get_status_icon(TEXT_ENCODERS_DIR, initial_te_value) if initial_te_value else "❌"
+                            initial_vae_status = get_status_icon(VAE_DIR, initial_vae_value) if initial_vae_value else "❌"
+                            
                             with gr.Row():
-                                # Use smart defaults based on detected mode
-                                initial_diffusion = get_models_by_mode(DIFFUSION_DIR, default_gguf_mode, DEFAULT_DIFFUSION, DEFAULT_DIFFUSION_GGUF, ZIMAGE_FILTERS["diffusion"])
-                                initial_diffusion_default = DEFAULT_DIFFUSION_GGUF if default_gguf_mode else DEFAULT_DIFFUSION
-                                unet_name = gr.Dropdown(label="Diffusion Model", choices=initial_diffusion, value=get_default_model(initial_diffusion, initial_diffusion_default), scale=2)
+                                unet_name = gr.Dropdown(label="Diffusion Model", choices=initial_diffusion, value=initial_diffusion_value, scale=3)
+                                unet_status = gr.Textbox(value=initial_diff_status, show_label=False, container=False, scale=0, min_width=30, interactive=False)
                             with gr.Row():
-                                initial_te = get_models_by_mode(TEXT_ENCODERS_DIR, default_gguf_mode, DEFAULT_TEXT_ENCODER, DEFAULT_TEXT_ENCODER_GGUF, ZIMAGE_FILTERS["text_encoder"])
-                                initial_te_default = DEFAULT_TEXT_ENCODER_GGUF if default_gguf_mode else DEFAULT_TEXT_ENCODER
-                                clip_name = gr.Dropdown(label="Text Encoder", choices=initial_te, value=get_default_model(initial_te, initial_te_default))
-                                vae_name = gr.Dropdown(label="VAE", choices=scan_models(VAE_DIR, (".safetensors",), ZIMAGE_FILTERS["vae"]) or [DEFAULT_VAE], value=DEFAULT_VAE)
+                                clip_name = gr.Dropdown(label="Text Encoder", choices=initial_te, value=initial_te_value, scale=3)
+                                clip_status = gr.Textbox(value=initial_te_status, show_label=False, container=False, scale=0, min_width=30, interactive=False)
+                            with gr.Row():
+                                vae_name = gr.Dropdown(label="VAE", choices=initial_vae, value=initial_vae_value, scale=3)
+                                vae_status = gr.Textbox(value=initial_vae_status, show_label=False, container=False, scale=0, min_width=30, interactive=False)
+                            
+                            with gr.Row():
+                                save_model_defaults_btn = gr.Button("⭐ Save as default", size="sm")
+                                model_defaults_status = gr.Textbox(value="", show_label=False, container=False, interactive=False, scale=2)
                             
                             # Model Management - auto-open if setup needed
                             with gr.Accordion("📦 Model Management", open=show_setup_banner):
@@ -1332,9 +1374,30 @@ Your models & LoRAs are automatically shared — no re-download needed!
             outputs=[prompt]
         )
         
+        # Status indicator helpers
+        def check_model_status(folder: Path, filename: str) -> str:
+            """Return ✓ if file exists, ❌ if not."""
+            if not filename:
+                return "❌"
+            return "✓" if (folder / filename).exists() else "❌"
+        
+        def update_unet_status(unet):
+            return check_model_status(DIFFUSION_DIR, unet)
+        
+        def update_clip_status(clip):
+            return check_model_status(TEXT_ENCODERS_DIR, clip)
+        
+        def update_vae_status(vae):
+            return check_model_status(VAE_DIR, vae)
+        
+        # Update status when dropdown selection changes
+        unet_name.change(fn=update_unet_status, inputs=[unet_name], outputs=[unet_status])
+        clip_name.change(fn=update_clip_status, inputs=[clip_name], outputs=[clip_status])
+        vae_name.change(fn=update_vae_status, inputs=[vae_name], outputs=[vae_status])
+        
         # Update model dropdowns based on GGUF mode and show_all filter
         def update_model_dropdowns(is_gguf, show_all):
-            """Refresh model dropdowns with current filter settings."""
+            """Refresh model dropdowns with current filter settings, including status indicators."""
             diff_filter = None if show_all else ZIMAGE_FILTERS["diffusion"]
             te_filter = None if show_all else ZIMAGE_FILTERS["text_encoder"]
             vae_filter = None if show_all else ZIMAGE_FILTERS["vae"]
@@ -1346,13 +1409,21 @@ Your models & LoRAs are automatically shared — no re-download needed!
             default_diffusion = DEFAULT_DIFFUSION_GGUF if is_gguf else DEFAULT_DIFFUSION
             default_clip = DEFAULT_TEXT_ENCODER_GGUF if is_gguf else DEFAULT_TEXT_ENCODER
             
+            # Get the values that will be selected
+            diff_value = get_default_model(diffusion_models, default_diffusion)
+            clip_value = get_default_model(clip_models, default_clip)
+            vae_value = get_default_model(vae_models, DEFAULT_VAE)
+            
             return (
-                gr.update(choices=diffusion_models, value=get_default_model(diffusion_models, default_diffusion)),
-                gr.update(choices=clip_models, value=get_default_model(clip_models, default_clip)),
-                gr.update(choices=vae_models, value=get_default_model(vae_models, DEFAULT_VAE)),
+                gr.update(choices=diffusion_models, value=diff_value),
+                gr.update(choices=clip_models, value=clip_value),
+                gr.update(choices=vae_models, value=vae_value),
+                check_model_status(DIFFUSION_DIR, diff_value),
+                check_model_status(TEXT_ENCODERS_DIR, clip_value),
+                check_model_status(VAE_DIR, vae_value),
             )
         
-        model_dropdown_outputs = [unet_name, clip_name, vae_name]
+        model_dropdown_outputs = [unet_name, clip_name, vae_name, unet_status, clip_status, vae_status]
         
         use_gguf.change(
             fn=update_model_dropdowns,
@@ -1364,6 +1435,25 @@ Your models & LoRAs are automatically shared — no re-download needed!
             fn=update_model_dropdowns,
             inputs=[use_gguf, show_all_models],
             outputs=model_dropdown_outputs
+        )
+        
+        # Save model defaults button
+        def save_model_defaults(is_gguf, diffusion, text_encoder, vae):
+            """Save current model selection as defaults for next startup."""
+            settings = load_ui_settings()
+            settings["model_defaults"] = {
+                "use_gguf": is_gguf,
+                "diffusion": diffusion,
+                "text_encoder": text_encoder,
+                "vae": vae,
+            }
+            save_ui_settings(settings)
+            return "✓ Saved as default"
+        
+        save_model_defaults_btn.click(
+            fn=save_model_defaults,
+            inputs=[use_gguf, unet_name, clip_name, vae_name],
+            outputs=[model_defaults_status]
         )
         
         # Refresh LoRA list
@@ -1760,7 +1850,8 @@ Your models & LoRAs are automatically shared — no re-download needed!
             mode_switch = gr.update(value=is_gguf_mode)
             return (status,) + dropdowns + (banner_visible, mode_switch)
         
-        download_outputs = [download_status, unet_name, clip_name, vae_name, setup_banner]
+        # download_outputs includes dropdowns + status indicators + banner
+        download_outputs = [download_status, unet_name, clip_name, vae_name, unet_status, clip_status, vae_status, setup_banner]
         download_inputs = [use_gguf, show_all_models]
         
         # Individual download buttons (don't change mode)
