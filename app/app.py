@@ -1417,8 +1417,8 @@ Distilled "turbo" models can produce similar images across different seeds, espe
                                     )
                                     upscale_save_to_comfyui = gr.Checkbox(
                                         label="Also save video to ComfyUI output folder",
-                                        value=True,
-                                        info="Backup copy saved alongside PNG sequence if enabled"
+                                        value=False,
+                                        info="Video output node will also save directly to comfyui output folder if enabled"
                                     )
                                     open_comfyui_output_btn = gr.Button("📂 Open ComfyUI Output Folder", size="sm")
                                     
