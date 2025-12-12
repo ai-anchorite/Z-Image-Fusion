@@ -39,7 +39,7 @@ This project is designed for 1-click installing via [Pinokio](https://pinokio.co
 
 - ⚡ **Z-Image Turbo** - Fast, low-step image generation with the Z-Image 6B distilled model
 - 🖼️ **Txt2Img & Img2Img** - with comfyui node parameters exposed to the UI
-- 🔍 **SeedVR2 4K Upscaler** - High-quality image upscaling
+- 🔍 **SeedVR2 4K Upscaler** - High-quality image and video upscaling
 - 🤖 **LLM Prompt Assistant** - AI-powered prompt enhancement and image description
 - 🎨 **LoRA Support** - Apply style/character Z-Image LoRAs
 - ⚙️ **GGUF friendly** - Quantized models for low VRAM
@@ -57,8 +57,8 @@ MIT License - See [LICENSE](LICENSE) file
 
 - Built with [Gradio](https://gradio.app/) and [ComfyKit](https://puke3615.github.io/ComfyKit/)
 - Powered by [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
-
 - GGUF support via [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) (Apache-2.0)
 - Upscaling via [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) (Apache-2.0)
+- Video export via [ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) (GPL-3.0)
 - Seed variance via [SeedVarianceEnhancer](https://github.com/ChangeTheConstants/SeedVarianceEnhancer) (MIT)
 - Camera prompts reference by [CameraPromptsGenerator](https://github.com/demon4932/CameraPromptsGenerator) (MIT)

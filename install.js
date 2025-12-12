@@ -36,6 +36,15 @@ module.exports = {
         ],
       }
     },
+    // Clone ComfyUI-VideoHelperSuite for advanced video export
+    {
+      method: "shell.run",
+      params: {
+        message: [
+          "git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git app/comfyui/custom_nodes/ComfyUI-VideoHelperSuite",
+        ],
+      }
+    },
     // Clone SeedVarianceEnhancer for more variation across seeds
     {
       method: "shell.run",
@@ -84,6 +93,17 @@ module.exports = {
         path: "app",
         message: [
           "uv pip install einops omegaconf>=2.3.0 diffusers>=0.33.1 peft>=0.17.0 rotary_embedding_torch>=0.5.3 opencv-python matplotlib",
+        ],
+      }
+    },
+    // Install ComfyUI-VideoHelperSuite requirements
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        path: "app",
+        message: [
+          "uv pip install opencv-python imageio-ffmpeg",
         ],
       }
     },

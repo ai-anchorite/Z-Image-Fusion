@@ -62,7 +62,7 @@
     },
     "class_type": "SeedVR2LoadDiTModel",
     "_meta": {
-      "title": "$dit_model.model, $blocks_to_swap"
+      "title": "$dit_model.model, $blocks_to_swap, $attention_mode"
     }
   },
   "16": {

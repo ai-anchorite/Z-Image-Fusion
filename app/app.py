@@ -57,8 +57,25 @@ def save_ui_settings(settings: dict) -> None:
             json.dump(settings, f, indent=2)
     except Exception as e:
         logger.error(f"Failed to save UI settings: {e}")
-OUTPUTS_DIR = APP_DIR / "outputs" / "z-image-fusion"
-OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def get_outputs_dir() -> Path:
+    """Get the outputs directory from settings, or use default."""
+    settings = load_ui_settings()
+    custom_path = settings.get("outputs_dir")
+    if custom_path:
+        path = Path(custom_path)
+        if path.is_absolute():
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+    # Default path
+    default = APP_DIR / "outputs" / "z-image-fusion"
+    default.mkdir(parents=True, exist_ok=True)
+    return default
+
+
+# Initialize outputs directory (can be changed via App Settings)
+OUTPUTS_DIR = get_outputs_dir()
 MODULES_DIR = APP_DIR / "modules"
 CAMERA_PROMPTS_DIR = APP_DIR / "CameraPromptsGenerator"
 
@@ -524,6 +541,7 @@ async def upscale_image(
     max_resolution: int,
     dit_model: str,
     blocks_to_swap: int,
+    attention_mode: str,
     # VAE settings
     encode_tiled: bool,
     encode_tile_size: int,
@@ -561,6 +579,7 @@ async def upscale_image(
             "max_resolution": int(max_resolution),
             "dit_model": dit_model,
             "blocks_to_swap": int(blocks_to_swap),
+            "attention_mode": attention_mode,
             # VAE settings
             "encode_tiled": encode_tiled,
             "encode_tile_size": int(encode_tile_size),
@@ -612,8 +631,18 @@ async def upscale_video(
     seed: int,
     randomize_seed: bool,
     resolution: int,
+    # Export settings
+    video_format: str,
+    video_crf: int,
+    video_pix_fmt: str,
+    prores_profile: str,
+    save_png_sequence: bool,
+    save_to_comfyui: bool,
+    filename_prefix: str,
+    # Model settings
     dit_model: str,
     blocks_to_swap: int,
+    attention_mode: str,
     # VAE settings
     encode_tiled: bool,
     encode_tile_size: int,
@@ -628,21 +657,47 @@ async def upscale_video(
     temporal_overlap: int,
     input_noise_scale: float,
     latent_noise_scale: float,
-    autosave: bool,
 ) -> tuple:
-    """Upscale a video using SeedVR2. Returns (video_path, status, seed)."""
+    """Upscale a video using SeedVR2 with VHS export. Returns (video_path, status, seed, output_path)."""
     try:
         if input_video is None:
-            return None, "❌ Please upload a video to upscale", seed
+            return None, "❌ Please upload a video to upscale", seed, None
         
         # SeedVR2 uses 32-bit seed max (4294967295)
         actual_seed = new_random_seed_32bit() if randomize_seed else min(int(seed), 4294967295)
         
         workflow_path = APP_DIR / "workflows" / "SeedVR2_HD_video_upscale.json"
         if not workflow_path.exists():
-            return None, "❌ Video upscale workflow not found", seed
+            return None, "❌ Video upscale workflow not found", seed, None
         
-        logger.info(f"Upscaling video with SeedVR2: {dit_model}, res={resolution}")
+        # Map UI format choice to VHS format string and file extension
+        format_map = {
+            "H.264 (MP4)": ("video/h264-mp4", ".mp4"),
+            "H.265 (MP4)": ("video/h265-mp4", ".mp4"),
+            "ProRes (MOV)": ("video/ProRes", ".mov"),
+        }
+        vhs_format, file_ext = format_map.get(video_format, ("video/h264-mp4", ".mp4"))
+        
+        # Extract meaningful name from input video
+        input_video_name = extract_meaningful_filename(input_video)
+        if input_video_name == "image":
+            input_video_name = "video"  # Better default for videos
+        
+        # Optional tag prefix from user
+        tag = filename_prefix.strip() if filename_prefix else ""
+        
+        # Build output filename: [tag_]inputname_resolution_timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if tag:
+            output_basename = f"{tag}_{input_video_name}_{resolution}p_{timestamp}"
+        else:
+            output_basename = f"{input_video_name}_{resolution}p_{timestamp}"
+        
+        # For ComfyUI/VHS, use a temp prefix (we'll copy to our folder after)
+        comfyui_prefix = f"seedvr2_temp_{timestamp}"
+        png_prefix = f"{comfyui_prefix}_png/{comfyui_prefix}"
+        
+        logger.info(f"Upscaling video with SeedVR2: {dit_model}, res={resolution}, format={vhs_format}, attn={attention_mode}")
         
         params = {
             "video": input_video,
@@ -650,6 +705,7 @@ async def upscale_video(
             "resolution": int(resolution),
             "dit_model": dit_model,
             "blocks_to_swap": int(blocks_to_swap),
+            "attention_mode": attention_mode,
             # VAE settings
             "encode_tiled": encode_tiled,
             "encode_tile_size": int(encode_tile_size),
@@ -664,41 +720,73 @@ async def upscale_video(
             "temporal_overlap": int(temporal_overlap),
             "input_noise_scale": float(input_noise_scale),
             "latent_noise_scale": float(latent_noise_scale),
+            # Export settings - VHS saves to ComfyUI output folder with temp prefix
+            "filename_prefix": comfyui_prefix,
+            "video_format": vhs_format,
+            "video_crf": int(video_crf),
+            "video_pix_fmt": video_pix_fmt,
+            "prores_profile": prores_profile,
+            # Redundancy - also save to ComfyUI output folder
+            "save_video_to_comfyui": save_to_comfyui,
+            # PNG sequence settings - save to ComfyUI first, we'll copy after
+            "save_png_sequence": save_png_sequence,
+            "png_filename_prefix": png_prefix,
         }
         
         result = await kit.execute(str(workflow_path), params)
         
         if result.status == "error":
-            return None, f"❌ Video upscale failed: {result.msg}", actual_seed
+            return None, f"❌ Video upscale failed: {result.msg}", actual_seed, None
         
         if not result.videos:
-            return None, "❌ No video generated", actual_seed
+            return None, "❌ No video generated", actual_seed, None
         
-        video_path = result.videos[0]
-        if video_path.startswith("http"):
-            # Download video from ComfyUI
-            async with httpx.AsyncClient() as client:
-                response = await client.get(video_path)
+        video_url = result.videos[0]
+        
+        # Save video to our outputs folder with proper naming
+        output_filename = f"{output_basename}{file_ext}"
+        output_dir = OUTPUTS_DIR / "upscaled"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / output_filename
+        
+        if video_url.startswith("http"):
+            async with httpx.AsyncClient(timeout=300) as client:
+                response = await client.get(video_url)
                 response.raise_for_status()
-                suffix = Path(video_path).suffix or ".mp4"
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as f:
+                with open(output_path, "wb") as f:
                     f.write(response.content)
-                    video_path = f.name
-        
-        # Autosave
-        if autosave:
-            save_video_to_outputs(video_path, input_video, resolution)
-            status = f"✓ {result.duration:.1f}s | Saved" if result.duration else "✓ Saved"
         else:
-            status = f"✓ {result.duration:.1f}s" if result.duration else "✓ Done"
+            # Local path - copy to our outputs
+            shutil.copy2(video_url, output_path)
         
-        return video_path, status, actual_seed
+        logger.info(f"Saved upscaled video to: {output_path}")
+        
+        # For Gradio display, copy to temp file to prevent Gradio's MP4 conversion
+        # from overwriting our saved output (especially for H.265 which shares .mp4 extension)
+        temp_display_path = tempfile.NamedTemporaryFile(delete=False, suffix=file_ext).name
+        shutil.copy2(output_path, temp_display_path)
+        
+        # Build status
+        time_str = f"{result.duration:.1f}s" if result.duration else ""
+        format_str = video_format.split(" ")[0]  # "H.264" from "H.264 (MP4)"
+        
+        status_parts = [f"✓ {format_str}"]
+        if time_str:
+            status_parts.append(time_str)
+        if save_png_sequence:
+            status_parts.append("+ PNG seq")
+        
+        status = " | ".join(status_parts)
+        status += f"\n📁 {output_path}"
+        
+        # Return temp path for Gradio display, actual output path for state
+        return temp_display_path, status, actual_seed, str(output_path)
         
     except Exception as e:
         logger.error(f"Video upscale error: {e}", exc_info=True)
         if "connect" in str(e).lower():
-            return None, "❌ Cannot connect to ComfyUI", seed
-        return None, f"❌ {str(e)}", seed
+            return None, "❌ Cannot connect to ComfyUI", seed, None
+        return None, f"❌ {str(e)}", seed, None
 
 
 def save_video_to_outputs(video_path: str, original_path: str = None, resolution: int = None) -> str:
@@ -1047,7 +1135,7 @@ def create_interface() -> gr.Blocks:
                                 )
                                 sv_strength = gr.Slider(
                                     label="Strength",
-                                    value=20.0, minimum=0.0, maximum=100.0, step=0.1,
+                                    value=20.0, minimum=0.0, maximum=100.0, step=0.5,
                                     info="Scale of the random noise"
                                 )
                             with gr.Row():
@@ -1258,30 +1346,90 @@ Distilled "turbo" models can produce similar images across different seeds, espe
                                         label="Resolution",
                                         value=3072,
                                         minimum=1024,
-                                        maximum=8192,
-                                        step=256,
-                                        info="Target resolution"
+                                        maximum=4096,
+                                        step=8,
+                                        info="Target short-side resolution"
                                     )
                                     upscale_max_resolution = gr.Slider(
                                         label="Max Resolution",
                                         value=4096,
                                         minimum=1024,
-                                        maximum=8192,
-                                        step=256,
-                                        info="Maximum output resolution"
+                                        maximum=7680,
+                                        step=8,
+                                        info="Maximum long-side resolution"
                                     )
                                 upscale_btn = gr.Button("🔍 Upscale Image", variant="primary", size="lg")
                             
                             with gr.TabItem("🎬 Video", id="upscale_video_tab"):
                                 upscale_input_video = gr.Video(label="Input Video", height=300)
-                                upscale_video_resolution = gr.Slider(
-                                    label="Resolution",
-                                    value=1080,
-                                    minimum=480,
-                                    maximum=2160,
-                                    step=120,
-                                    info="Target resolution (height)"
-                                )
+                                with gr.Row():
+                                    upscale_video_resolution = gr.Slider(
+                                        label="Resolution",
+                                        value=1080,
+                                        minimum=640,
+                                        maximum=2160,
+                                        step=2,
+                                        info="Target short-side resolution",
+                                        scale=3
+                                    )
+                                    upscale_video_res_720_btn = gr.Button("720", size="sm", scale=0, min_width=50)
+                                    upscale_video_res_1080_btn = gr.Button("1080", size="sm", scale=0, min_width=50)
+                                
+                                # Video Export Settings
+                                with gr.Accordion("📹 Export Settings", open=False):
+                                    upscale_video_format = gr.Dropdown(
+                                        label="Format",
+                                        choices=["H.264 (MP4)", "H.265 (MP4)", "ProRes (MOV)"],
+                                        value="H.264 (MP4)",
+                                        info="Output video format"
+                                    )
+                                    # H.264/H.265 options
+                                    upscale_video_crf = gr.Slider(
+                                        label="Quality (CRF)",
+                                        value=19,
+                                        minimum=0,
+                                        maximum=51,
+                                        step=1,
+                                        info="Lower = better quality, larger file. 19 is visually lossless",
+                                        visible=True
+                                    )
+                                    upscale_video_pix_fmt = gr.Dropdown(
+                                        label="Pixel Format",
+                                        choices=["yuv420p", "yuv420p10le"],
+                                        value="yuv420p",
+                                        info="10-bit (10le) for higher quality, 8-bit for compatibility",
+                                        visible=True
+                                    )
+                                    # ProRes options
+                                    upscale_prores_profile = gr.Dropdown(
+                                        label="ProRes Profile",
+                                        choices=["lt", "standard", "hq", "4444", "4444xq"],
+                                        value="hq",
+                                        info="HQ for most uses, 4444/4444XQ for maximum quality",
+                                        visible=False
+                                    )
+                                    # Redundancy options - save to ComfyUI output folder
+                                    gr.Markdown("**Redundancy Options** *(saves to ComfyUI output)*")
+                                    upscale_save_png_sequence = gr.Checkbox(
+                                        label="Also save PNG sequence (16-bit lossless)",
+                                        value=False,
+                                        info="Failsafe for long videos - saves frames as individual PNGs"
+                                    )
+                                    upscale_save_to_comfyui = gr.Checkbox(
+                                        label="Also save video to ComfyUI output folder",
+                                        value=True,
+                                        info="Backup copy saved alongside PNG sequence if enabled"
+                                    )
+                                    open_comfyui_output_btn = gr.Button("📂 Open ComfyUI Output Folder", size="sm")
+                                    
+                                    # Optional filename tag
+                                    upscale_video_filename = gr.Textbox(
+                                        label="Filename Tag (optional)",
+                                        value="",
+                                        placeholder="e.g. test1, final",
+                                        info="Optional prefix tag added to output filename"
+                                    )
+                                
                                 upscale_video_btn = gr.Button("🎬 Upscale Video", variant="primary", size="lg")
                         
                         with gr.Accordion("🔧 SeedVR2 Settings", open=True):
@@ -1291,14 +1439,21 @@ Distilled "turbo" models can produce similar images across different seeds, espe
                                 value=DEFAULT_SEEDVR2_DIT,
                                 info="Models auto-download on first use"
                             )
-                            upscale_blocks_to_swap = gr.Slider(
-                                label="Block Swap",
-                                value=36,
-                                minimum=0,
-                                maximum=36,
-                                step=1,
-                                info="Higher = less VRAM, slower. Lower = faster, more VRAM"
-                            )
+                            with gr.Row():
+                                upscale_blocks_to_swap = gr.Slider(
+                                    label="Block Swap",
+                                    value=36,
+                                    minimum=0,
+                                    maximum=36,
+                                    step=1,
+                                    info="Higher = less VRAM, slower"
+                                )
+                                upscale_attention_mode = gr.Dropdown(
+                                    label="Attention",
+                                    choices=["sdpa", "flash_attn"],
+                                    value="sdpa",
+                                    info="flash_attn is faster if available"
+                                )
                         
                         with gr.Accordion("🎛️ Advanced Settings", open=False):
                             with gr.Row():
@@ -1403,6 +1558,7 @@ Distilled "turbo" models can produce similar images across different seeds, espe
                                     scale=2
                                 )
                                 upscale_load_preset_btn = gr.Button("📂 Load", size="sm", scale=1)
+                                upscale_delete_preset_btn = gr.Button("🗑️", size="sm", scale=0, min_width=40)
                             with gr.Row():
                                 upscale_preset_name = gr.Textbox(
                                     label="Preset Name",
@@ -1425,15 +1581,21 @@ Distilled "turbo" models can produce similar images across different seeds, espe
                                     type="filepath",
                                     show_download_button=True
                                 )
+                                with gr.Row():                          
+                                    upscale_save_btn = gr.Button("💾 Save", size="sm")
+                                upscale_autosave = gr.Checkbox(label="Auto-save", value=False)
+                            
                             with gr.TabItem("🎬 Video Result", id="upscale_video_result"):
                                 upscale_output_video = gr.Video(label="Upscaled Video")
+                                gr.Markdown(
+                                    "*All upscaled videos are automatically saved to the output folder. "
+                                    "Note: Gradio converts H.265/ProRes to MP4 for browser preview — "
+                                    "the saved file retains full quality.*",
+                                    elem_classes=["video-note"]
+                                )
 
-                        with gr.Row():                          
-                            upscale_save_btn = gr.Button("💾 Save", size="sm")
-                            upscale_open_folder_btn = gr.Button("📂 Open Folder", size="sm")
-                     
-                        upscale_autosave = gr.Checkbox(label="Auto-save", value=False)
-                        upscale_status = gr.Textbox(label="Status", interactive=False, show_label=False)
+                        upscale_status = gr.Textbox(label="Status", interactive=False, show_label=False, lines=2)
+                        upscale_open_folder_btn = gr.Button("📂 Open Output Folder", size="sm")
 
                         # Hidden state for upscaled paths and original info (for save naming)
                         upscale_result_path = gr.State(value=None)
@@ -1462,6 +1624,23 @@ Distilled "turbo" models can produce similar images across different seeds, espe
             with gr.TabItem("⚙️ LLM Settings"):
                 prompt_assistant.render_settings_ui()
             
+            # ===== APP SETTINGS TAB =====
+            with gr.TabItem("🛠️ App Settings"):
+                gr.Markdown("### Output Directory")
+                gr.Markdown("*Set a custom folder for saving generated images and upscaled videos.*")
+                with gr.Row():
+                    app_outputs_dir = gr.Textbox(
+                        label="Output Folder",
+                        value=str(OUTPUTS_DIR),
+                        placeholder="Leave empty for default",
+                        scale=3
+                    )
+                    app_outputs_browse_btn = gr.Button("📂 Browse", size="sm", scale=0)
+                with gr.Row():
+                    app_outputs_save_btn = gr.Button("💾 Save", variant="primary", size="sm")
+                    app_outputs_reset_btn = gr.Button("↩️ Reset to Default", size="sm")
+                app_settings_status = gr.Textbox(label="", interactive=False, show_label=False)
+                gr.Markdown(f"*Default: `{APP_DIR / 'outputs' / 'z-image-fusion'}`*")
         
         # ===== EVENT HANDLERS =====
         
@@ -1612,6 +1791,7 @@ Distilled "turbo" models can produce similar images across different seeds, espe
         upscale_all_settings = [
             upscale_dit_model,
             upscale_blocks_to_swap,
+            upscale_attention_mode,
             upscale_batch_size,
             upscale_uniform_batch,
             upscale_color_correction,
@@ -1624,12 +1804,28 @@ Distilled "turbo" models can produce similar images across different seeds, espe
             upscale_decode_tiled,
             upscale_decode_tile_size,
             upscale_decode_tile_overlap,
+            # Video export settings
+            upscale_video_format,
+            upscale_video_crf,
+            upscale_video_pix_fmt,
+            upscale_prores_profile,
+            upscale_save_png_sequence,
+            upscale_save_to_comfyui,
+            # Resolution settings
+            upscale_resolution,
+            upscale_max_resolution,
+            upscale_video_resolution,
         ]
         upscale_setting_keys = [
-            "dit_model", "blocks_to_swap", "batch_size", "uniform_batch",
+            "dit_model", "blocks_to_swap", "attention_mode", "batch_size", "uniform_batch",
             "color_correction", "temporal_overlap", "input_noise", "latent_noise",
             "encode_tiled", "encode_tile_size", "encode_tile_overlap",
             "decode_tiled", "decode_tile_size", "decode_tile_overlap",
+            # Video export settings
+            "video_format", "video_crf", "video_pix_fmt", "prores_profile", "save_png_sequence",
+            "save_to_comfyui",
+            # Resolution settings
+            "image_resolution", "image_max_resolution", "video_resolution",
         ]
         
         # Built-in defaults (used if no user preset exists)
@@ -1637,6 +1833,7 @@ Distilled "turbo" models can produce similar images across different seeds, espe
             "Image Default": {
                 "dit_model": DEFAULT_SEEDVR2_DIT,
                 "blocks_to_swap": 36,
+                "attention_mode": "flash_attn",
                 "batch_size": 1,
                 "uniform_batch": False,
                 "color_correction": "lab",
@@ -1649,10 +1846,22 @@ Distilled "turbo" models can produce similar images across different seeds, espe
                 "decode_tiled": True,
                 "decode_tile_size": 1024,
                 "decode_tile_overlap": 128,
+                # Video export (not used for image, but included for consistency)
+                "video_format": "H.264 (MP4)",
+                "video_crf": 19,
+                "video_pix_fmt": "yuv420p",
+                "prores_profile": "hq",
+                "save_png_sequence": False,
+                "save_to_comfyui": True,
+                # Resolution
+                "image_resolution": 3072,
+                "image_max_resolution": 4096,
+                "video_resolution": 1080,
             },
             "Video Default": {
                 "dit_model": "seedvr2_ema_3b_fp16.safetensors",
                 "blocks_to_swap": 32,
+                "attention_mode": "flash_attn",
                 "batch_size": 33,
                 "uniform_batch": True,
                 "color_correction": "lab",
@@ -1665,6 +1874,17 @@ Distilled "turbo" models can produce similar images across different seeds, espe
                 "decode_tiled": True,
                 "decode_tile_size": 768,
                 "decode_tile_overlap": 128,
+                # Video export defaults
+                "video_format": "H.264 (MP4)",
+                "video_crf": 19,
+                "video_pix_fmt": "yuv420p",
+                "prores_profile": "hq",
+                "save_png_sequence": False,
+                "save_to_comfyui": True,
+                # Resolution
+                "image_resolution": 3072,
+                "image_max_resolution": 4096,
+                "video_resolution": 1080,
             },
         }
         
@@ -1679,9 +1899,12 @@ Distilled "turbo" models can produce similar images across different seeds, espe
         def apply_upscale_preset(preset: dict):
             """Convert preset dict to tuple of values for UI components."""
             max_blocks = get_seedvr2_max_blocks(preset.get("dit_model", DEFAULT_SEEDVR2_DIT))
+            video_format = preset.get("video_format", "H.264 (MP4)")
+            is_prores = "ProRes" in video_format
             return (
                 preset.get("dit_model", DEFAULT_SEEDVR2_DIT),
                 gr.update(value=preset.get("blocks_to_swap", 36), maximum=max_blocks),
+                preset.get("attention_mode", "flash_attn"),
                 preset.get("batch_size", 1),
                 preset.get("uniform_batch", False),
                 preset.get("color_correction", "lab"),
@@ -1694,6 +1917,17 @@ Distilled "turbo" models can produce similar images across different seeds, espe
                 preset.get("decode_tiled", True),
                 preset.get("decode_tile_size", 1024),
                 preset.get("decode_tile_overlap", 128),
+                # Video export settings
+                video_format,
+                gr.update(value=preset.get("video_crf", 19), visible=not is_prores),
+                gr.update(value=preset.get("video_pix_fmt", "yuv420p"), visible=not is_prores),
+                gr.update(value=preset.get("prores_profile", "hq"), visible=is_prores),
+                preset.get("save_png_sequence", False),
+                preset.get("save_to_comfyui", True),
+                # Resolution settings
+                preset.get("image_resolution", 3072),
+                preset.get("image_max_resolution", 4096),
+                preset.get("video_resolution", 1080),
             )
         
         # Tab switching loads from preset system and tracks active tab
@@ -1781,6 +2015,31 @@ Distilled "turbo" models can produce similar images across different seeds, espe
             outputs=[upscale_preset_status] + upscale_all_settings
         )
         
+        def delete_upscale_preset(name):
+            """Delete a user preset (cannot delete built-in defaults)."""
+            if name in UPSCALE_BUILTIN_DEFAULTS or name == "─────────":
+                return f"❌ Cannot delete '{name}'", gr.update()
+            
+            settings = load_ui_settings()
+            user_presets = settings.get("upscale_presets", {})
+            if name not in user_presets:
+                return f"❌ Preset '{name}' not found", gr.update()
+            
+            del user_presets[name]
+            settings["upscale_presets"] = user_presets
+            save_ui_settings(settings)
+            
+            # Update dropdown choices
+            remaining = list(user_presets.keys())
+            choices = remaining + (["─────────"] if remaining else []) + list(UPSCALE_BUILTIN_DEFAULTS.keys())
+            return f"✓ Deleted '{name}'", gr.update(choices=choices, value="Image Default")
+        
+        upscale_delete_preset_btn.click(
+            fn=delete_upscale_preset,
+            inputs=[upscale_preset_dropdown],
+            outputs=[upscale_preset_status, upscale_preset_dropdown]
+        )
+        
         # Shared inputs for both generate buttons
         common_inputs = [
             use_gguf,
@@ -1818,10 +2077,11 @@ Distilled "turbo" models can produce similar images across different seeds, espe
             outputs=[output_gallery, gen_status, seed]
         )
         
-        # Shared upscale inputs (SeedVR2 settings)
+        # Shared upscale inputs (SeedVR2 settings) - for image upscale
         upscale_common_inputs = [
             upscale_dit_model,
             upscale_blocks_to_swap,
+            upscale_attention_mode,
             # VAE settings
             upscale_encode_tiled,
             upscale_encode_tile_size,
@@ -1837,6 +2097,27 @@ Distilled "turbo" models can produce similar images across different seeds, espe
             upscale_input_noise,
             upscale_latent_noise,
             upscale_autosave,
+        ]
+        
+        # Video upscale inputs - includes attention_mode, no autosave (always saves)
+        upscale_video_common_inputs = [
+            upscale_dit_model,
+            upscale_blocks_to_swap,
+            upscale_attention_mode,
+            # VAE settings
+            upscale_encode_tiled,
+            upscale_encode_tile_size,
+            upscale_encode_tile_overlap,
+            upscale_decode_tiled,
+            upscale_decode_tile_size,
+            upscale_decode_tile_overlap,
+            # Upscaler settings
+            upscale_batch_size,
+            upscale_uniform_batch,
+            upscale_color_correction,
+            upscale_temporal_overlap,
+            upscale_input_noise,
+            upscale_latent_noise,
         ]
         
         # Image Upscale - wrapper to also switch output tab
@@ -1860,8 +2141,19 @@ Distilled "turbo" models can produce similar images across different seeds, espe
         # Video Upscale - wrapper to also switch output tab
         async def upscale_video_and_switch(*args):
             result = await upscale_video(*args)
-            # Return result + tab switch to video result
+            # Return result + tab switch to video result (result has 4 items now)
             return result + (gr.Tabs(selected="upscale_video_result"),)
+        
+        # Video export inputs (before common inputs)
+        upscale_video_export_inputs = [
+            upscale_video_format,
+            upscale_video_crf,
+            upscale_video_pix_fmt,
+            upscale_prores_profile,
+            upscale_save_png_sequence,
+            upscale_save_to_comfyui,
+            upscale_video_filename,
+        ]
         
         upscale_video_btn.click(
             fn=upscale_video_and_switch,
@@ -1870,9 +2162,32 @@ Distilled "turbo" models can produce similar images across different seeds, espe
                 upscale_seed,
                 upscale_randomize_seed,
                 upscale_video_resolution,
-            ] + upscale_common_inputs,
-            outputs=[upscale_output_video, upscale_status, upscale_seed, upscale_output_tabs]
+            ] + upscale_video_export_inputs + upscale_video_common_inputs,
+            outputs=[upscale_output_video, upscale_status, upscale_seed, upscale_video_result_path, upscale_output_tabs]
         )
+        
+        # Video format change handler - show/hide format-specific options
+        def on_video_format_change(format_choice):
+            is_prores = "ProRes" in format_choice
+            is_h265 = "H.265" in format_choice
+            # CRF default: 19 for H.264, 22 for H.265
+            crf_default = 22 if is_h265 else 19
+            return (
+                gr.update(visible=not is_prores),  # CRF slider
+                gr.update(visible=not is_prores),  # Pixel format
+                gr.update(visible=is_prores),      # ProRes profile
+                gr.update(value=crf_default) if not is_prores else gr.update(),  # Update CRF default
+            )
+        
+        upscale_video_format.change(
+            fn=on_video_format_change,
+            inputs=[upscale_video_format],
+            outputs=[upscale_video_crf, upscale_video_pix_fmt, upscale_prores_profile, upscale_video_crf]
+        )
+        
+        # Video resolution quick buttons
+        upscale_video_res_720_btn.click(fn=lambda: 720, outputs=[upscale_video_resolution])
+        upscale_video_res_1080_btn.click(fn=lambda: 1080, outputs=[upscale_video_resolution])
         
         unload_btn.click(
             fn=unload_models,
@@ -1981,6 +2296,9 @@ Distilled "turbo" models can produce similar images across different seeds, espe
         open_te_btn.click(fn=lambda: open_folder(TEXT_ENCODERS_DIR))
         open_vae_btn.click(fn=lambda: open_folder(VAE_DIR))
         
+        # ComfyUI output folder (for redundancy options)
+        open_comfyui_output_btn.click(fn=lambda: open_folder(APP_DIR / "comfyui" / "output"))
+        
         # Open documentation file
         def open_documentation():
             doc_path = APP_DIR / "DOCUMENTATION.md"
@@ -2084,6 +2402,67 @@ Distilled "turbo" models can produce similar images across different seeds, espe
             return "❌ Camera prompts not found"
         
         open_camera_prompts_btn.click(fn=open_camera_prompts)
+        
+        # App Settings handlers
+        def save_outputs_dir(path_str):
+            """Save custom outputs directory."""
+            global OUTPUTS_DIR
+            path_str = path_str.strip()
+            
+            if not path_str:
+                # Empty = use default
+                settings = load_ui_settings()
+                if "outputs_dir" in settings:
+                    del settings["outputs_dir"]
+                    save_ui_settings(settings)
+                OUTPUTS_DIR = get_outputs_dir()
+                return f"✓ Reset to default: {OUTPUTS_DIR}"
+            
+            path = Path(path_str)
+            if not path.is_absolute():
+                return "❌ Please enter an absolute path (e.g. C:\\Users\\...)"
+            
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+                settings = load_ui_settings()
+                settings["outputs_dir"] = str(path)
+                save_ui_settings(settings)
+                OUTPUTS_DIR = path
+                return f"✓ Saved: {path}"
+            except Exception as e:
+                return f"❌ Invalid path: {e}"
+        
+        def reset_outputs_dir():
+            """Reset outputs directory to default."""
+            global OUTPUTS_DIR
+            settings = load_ui_settings()
+            if "outputs_dir" in settings:
+                del settings["outputs_dir"]
+                save_ui_settings(settings)
+            OUTPUTS_DIR = get_outputs_dir()
+            return str(OUTPUTS_DIR), f"✓ Reset to default"
+        
+        def browse_outputs_dir():
+            """Open file dialog - returns current path (user manually pastes)."""
+            # Gradio doesn't have native folder picker, so just open the current folder
+            open_folder(OUTPUTS_DIR)
+            return f"📂 Opened current folder. Copy your desired path and paste above."
+        
+        app_outputs_save_btn.click(
+            fn=save_outputs_dir,
+            inputs=[app_outputs_dir],
+            outputs=[app_settings_status]
+        )
+        
+        app_outputs_reset_btn.click(
+            fn=reset_outputs_dir,
+            outputs=[app_outputs_dir, app_settings_status]
+        )
+        
+        app_outputs_browse_btn.click(
+            fn=browse_outputs_dir,
+            outputs=[app_settings_status]
+        )
     
     return interface
 

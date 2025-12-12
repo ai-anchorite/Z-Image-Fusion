@@ -14,7 +14,7 @@
       "offload_device": "cpu",
       "enable_debug": false,
       "image": [
-        "28",
+        "30",
         0
       ],
       "dit": [
@@ -62,64 +62,85 @@
     },
     "class_type": "SeedVR2LoadDiTModel",
     "_meta": {
-      "title": "$dit_model.model, $blocks_to_swap"
+      "title": "$dit_model.model, $blocks_to_swap, $attention_mode"
     }
   },
   "24": {
     "inputs": {
-      "filename_prefix": "video/ComfyUI",
-      "format": "auto",
-      "codec": "auto",
-      "video": [
-        "29",
+      "frame_rate": [
+        "31",
         0
-      ]
-    },
-    "class_type": "SaveVideo",
-    "_meta": {
-      "title": "$output.result"
-    }
-  },
-  "26": {
-    "inputs": {
-      "file": "placeholder.mp4",
-      "video-preview": ""
-    },
-    "class_type": "LoadVideo",
-    "_meta": {
-      "title": "$video.file!"
-    }
-  },
-  "28": {
-    "inputs": {
-      "video": [
-        "26",
-        0
-      ]
-    },
-    "class_type": "GetVideoComponents",
-    "_meta": {
-      "title": "Get Video Components"
-    }
-  },
-  "29": {
-    "inputs": {
-      "fps": [
-        "28",
-        2
       ],
+      "loop_count": 0,
+      "filename_prefix": "SeedVR2_upscaled",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true,
+      "crf": 19,
+      "pix_fmt": "yuv420p",
+      "profile": "hq",
+      "save_metadata": true,
       "images": [
         "10",
         0
       ],
       "audio": [
-        "28",
-        1
+        "30",
+        2
       ]
     },
-    "class_type": "CreateVideo",
+    "class_type": "VHS_VideoCombine",
     "_meta": {
-      "title": "Create Video"
+      "title": "$filename_prefix, $video_format.format, $video_crf.crf, $video_pix_fmt.pix_fmt, $prores_profile.profile, $save_video_to_comfyui.save_output"
+    }
+  },
+  "25": {
+    "inputs": {
+      "frame_rate": [
+        "31",
+        0
+      ],
+      "loop_count": 0,
+      "filename_prefix": "SeedVR2_upscaled_png",
+      "format": "video/16bit-png",
+      "pingpong": false,
+      "save_output": false,
+      "images": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "PNG Sequence, $png_filename_prefix.filename_prefix, $save_png_sequence.save_output"
+    }
+  },
+  "30": {
+    "inputs": {
+      "video": "input.mp4",
+      "force_rate": 0,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 0,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "AnimateDiff"
+    },
+    "class_type": "VHS_LoadVideo",
+    "_meta": {
+      "title": "Load Video, $video.video!"
+    }
+  },
+  "31": {
+    "inputs": {
+      "video_info": [
+        "30",
+        3
+      ]
+    },
+    "class_type": "VHS_VideoInfo",
+    "_meta": {
+      "title": "Video Info"
     }
   }
 }

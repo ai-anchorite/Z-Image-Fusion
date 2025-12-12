@@ -39,6 +39,21 @@ module.exports = {
         message: "git pull"
       }
     },
+    // Clone ComfyUI-VideoHelperSuite if not exists (for existing installs)
+    {
+      method: "shell.run",
+      params: {
+        message: "git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git app/comfyui/custom_nodes/ComfyUI-VideoHelperSuite"
+      }
+    },
+    // Pull latest changes for ComfyUI-VideoHelperSuite
+    {
+      method: "shell.run",
+      params: {
+        path: "app/comfyui/custom_nodes/ComfyUI-VideoHelperSuite",
+        message: "git pull"
+      }
+    },
     // Clone SeedVarianceEnhancer if not exists (for existing installs)
     {
       method: "shell.run",
@@ -94,6 +109,15 @@ module.exports = {
         venv: "env",
         path: "app",
         message: "uv pip install einops omegaconf>=2.3.0 diffusers>=0.33.1 peft>=0.17.0 rotary_embedding_torch>=0.5.3 opencv-python matplotlib",
+      }
+    },
+    // Reinstall ComfyUI-VideoHelperSuite requirements
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        path: "app",
+        message: "uv pip install opencv-python imageio-ffmpeg",
       }
     },
     // Reinstall Gradio app requirements
