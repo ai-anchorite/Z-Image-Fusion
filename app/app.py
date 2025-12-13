@@ -79,6 +79,47 @@ OUTPUTS_DIR = get_outputs_dir()
 MODULES_DIR = APP_DIR / "modules"
 CAMERA_PROMPTS_DIR = APP_DIR / "CameraPromptsGenerator"
 
+# Gradio temp directory (uses GRADIO_TEMP_DIR env var if set, else system temp)
+GRADIO_TEMP_DIR = Path(os.environ.get("GRADIO_TEMP_DIR", tempfile.gettempdir()))
+
+
+def clear_temp_folder() -> tuple[bool, str]:
+    """Clear the Gradio temp folder. Returns (success, message)."""
+    try:
+        # Resolve to absolute path
+        temp_path = GRADIO_TEMP_DIR.resolve()
+        logger.info(f"Clearing temp folder: {temp_path}")
+        
+        if temp_path.exists():
+            file_count = sum(1 for _ in temp_path.rglob("*") if _.is_file())
+            shutil.rmtree(temp_path)
+            temp_path.mkdir(parents=True, exist_ok=True)
+            return True, f"✓ Cleared {file_count} files from {temp_path}"
+        return True, f"✓ Temp folder empty ({temp_path})"
+    except Exception as e:
+        logger.warning(f"Failed to clear temp folder: {e}")
+        return False, f"❌ Failed to clear temp: {e}"
+
+
+def get_clear_temp_on_start() -> bool:
+    """Get the clear temp on start setting."""
+    settings = load_ui_settings()
+    return settings.get("clear_temp_on_start", False)
+
+
+def set_clear_temp_on_start(enabled: bool) -> None:
+    """Save the clear temp on start setting."""
+    settings = load_ui_settings()
+    settings["clear_temp_on_start"] = enabled
+    save_ui_settings(settings)
+
+
+# Clear temp on startup if enabled
+if get_clear_temp_on_start():
+    success, msg = clear_temp_folder()
+    if success:
+        logger.info(f"Startup: {msg}")
+
 # Initialize Prompt Assistant
 prompt_assistant = PromptAssistant(
     settings_file=str(MODULES_DIR / "llm_settings.json"),
@@ -1694,9 +1735,19 @@ Distilled "turbo" models can produce similar images across different seeds, espe
                 with gr.Row():
                     app_outputs_save_btn = gr.Button("💾 Save", variant="primary", size="sm")
                     app_outputs_reset_btn = gr.Button("↩️ Reset to Default", size="sm")
-                app_settings_status = gr.Textbox(label="", interactive=False, show_label=False)
                 gr.Markdown(f"*Default: `{APP_DIR / 'outputs' / 'z-image-fusion'}`*")
-        
+                
+                gr.Markdown("---")
+                gr.Markdown("### Temp Folder")
+                gr.Markdown("*Gradio stores temporary files (previews, cached images) in the system temp folder.*")
+                with gr.Row():
+                    clear_temp_on_start = gr.Checkbox(
+                        label="Clear temp folder on app start",
+                        value=get_clear_temp_on_start()
+                    )
+                    clear_temp_btn = gr.Button("🗑️ Clear Now", size="sm")
+                app_settings_status = gr.Textbox(label="", interactive=False, show_label=False)
+     
         # ===== EVENT HANDLERS =====
         
         # Prompt Assistant mode toggle
@@ -2309,9 +2360,9 @@ Distilled "turbo" models can produce similar images across different seeds, espe
             outputs=[upscale_status]
         )
         
-        # Send to Upscale - use selected image or first from gallery
-        def send_to_upscale(selected_img, gallery_data):
-            """Send selected image (or first image) to upscale tab."""
+        # Send to Upscale - copy temp image with proper name so upscale can use it for naming
+        def send_to_upscale(selected_img, gallery_data, prompt_text):
+            """Copy selected image to temp with proper name, then send to upscale tab."""
             image_to_send = None
             
             # Prefer explicitly selected image
@@ -2325,11 +2376,21 @@ Distilled "turbo" models can produce similar images across different seeds, espe
             if not image_to_send:
                 return None, gr.Tabs()  # No change if no image
             
-            return image_to_send, gr.Tabs(selected="tab_upscale")
+            # Create a properly named temp file so upscale save can extract the name
+            safe_prompt = "".join(c if c.isalnum() or c in " -_" else "" for c in (prompt_text or "")[:30]).strip()
+            safe_prompt = safe_prompt.replace(" ", "_") if safe_prompt else "image"
+            timestamp = datetime.now().strftime("%H%M%S")
+            named_filename = f"{safe_prompt}_{timestamp}.png"
+            
+            # Copy to temp dir with the proper name
+            named_path = Path(tempfile.gettempdir()) / named_filename
+            shutil.copy2(image_to_send, named_path)
+            
+            return str(named_path), gr.Tabs(selected="tab_upscale")
         
         send_to_upscale_btn.click(
             fn=send_to_upscale,
-            inputs=[selected_gallery_image, output_gallery],
+            inputs=[selected_gallery_image, output_gallery, prompt],
             outputs=[upscale_input_image, main_tabs]
         )
         
@@ -2524,6 +2585,26 @@ Distilled "turbo" models can produce similar images across different seeds, espe
         
         app_outputs_browse_btn.click(
             fn=browse_outputs_dir,
+            outputs=[app_settings_status]
+        )
+        
+        # Temp folder handlers
+        def on_clear_temp_on_start_change(enabled):
+            set_clear_temp_on_start(enabled)
+            return f"✓ Clear on start: {'enabled' if enabled else 'disabled'}"
+        
+        def on_clear_temp_now():
+            success, msg = clear_temp_folder()
+            return msg
+        
+        clear_temp_on_start.change(
+            fn=on_clear_temp_on_start_change,
+            inputs=[clear_temp_on_start],
+            outputs=[app_settings_status]
+        )
+        
+        clear_temp_btn.click(
+            fn=on_clear_temp_now,
             outputs=[app_settings_status]
         )
     
