@@ -92,6 +92,29 @@ TEXT_ENCODERS_DIR = MODELS_DIR / "text_encoders"
 VAE_DIR = MODELS_DIR / "vae"
 LORAS_DIR = MODELS_DIR / "loras"
 
+# Dummy lora filename (used when lora disabled - strength 0 bypasses it)
+DUMMY_LORA = "none.safetensors"
+
+
+def ensure_dummy_lora():
+    """Create a minimal dummy lora file for disabled slots."""
+    dummy_path = LORAS_DIR / DUMMY_LORA
+    if dummy_path.exists():
+        return
+    
+    try:
+        LORAS_DIR.mkdir(parents=True, exist_ok=True)
+        import torch
+        from safetensors.torch import save_file
+        save_file({"__placeholder__": torch.zeros(1)}, str(dummy_path))
+        logger.info(f"Created dummy lora: {dummy_path}")
+    except Exception as e:
+        logger.warning(f"Could not create dummy lora: {e}")
+
+
+# Create dummy lora on startup
+ensure_dummy_lora()
+
 # Initialize ComfyKit client
 try:
     kit = ComfyKit()
@@ -341,14 +364,16 @@ def new_random_seed_32bit():
     return random.randint(0, 4294967295)
 
 
-def get_workflow_file(gen_type: str, use_lora: bool, use_gguf: bool) -> str:
-    """Determine which workflow file to use based on settings."""
+def get_workflow_file(gen_type: str, use_gguf: bool) -> str:
+    """Determine which workflow file to use based on settings.
+    
+    Always uses lora workflows - loras are disabled by setting strength to 0.
+    """
     parts = ["z_image"]
     if use_gguf:
         parts.append("gguf")
     parts.append(gen_type)
-    if use_lora:
-        parts.append("lora")
+    parts.append("lora")  # Always use lora workflow
     return "_".join(parts) + ".json"
 
 
@@ -366,8 +391,10 @@ async def generate_image(
     sampler_name: str, scheduler: str,
     # model params
     unet_name: str, clip_name: str, vae_name: str,
-    # lora params
-    use_lora: bool, lora_name: str, lora_strength: float,
+    # lora params (3 slots with enable flags)
+    lora1_enabled: bool, lora1_name: str, lora1_strength: float,
+    lora2_enabled: bool, lora2_name: str, lora2_strength: float,
+    lora3_enabled: bool, lora3_name: str, lora3_strength: float,
     # output params
     autosave: bool,
     # batch params
@@ -399,7 +426,7 @@ async def generate_image(
         return
     
     # Select workflow
-    workflow_file = get_workflow_file(gen_type, use_lora, use_gguf)
+    workflow_file = get_workflow_file(gen_type, use_gguf)
     workflow_path = APP_DIR / "workflows" / workflow_file
     
     if not workflow_path.exists():
@@ -450,10 +477,16 @@ async def generate_image(
                 params["megapixels"] = megapixels
                 params["denoise"] = denoise
             
-            # Add lora params if enabled
-            if use_lora and lora_name:
-                params["lora_name"] = lora_name
-                params["lora_strength"] = lora_strength
+            # Add lora params (3 slots - use dummy lora with strength 0 when disabled)
+            params["lora1_name"] = lora1_name if (lora1_enabled and lora1_name) else DUMMY_LORA
+            params["lora1_strength"] = lora1_strength if (lora1_enabled and lora1_name) else 0
+            params["lora2_name"] = lora2_name if (lora2_enabled and lora2_name) else DUMMY_LORA
+            params["lora2_strength"] = lora2_strength if (lora2_enabled and lora2_name) else 0
+            params["lora3_name"] = lora3_name if (lora3_enabled and lora3_name) else DUMMY_LORA
+            params["lora3_strength"] = lora3_strength if (lora3_enabled and lora3_name) else 0
+            
+            # Debug: log lora params
+            logger.info(f"LoRA params: lora1={params['lora1_name']} ({params['lora1_strength']}), lora2={params['lora2_name']} ({params['lora2_strength']}), lora3={params['lora3_name']} ({params['lora3_strength']})")
             
             # Add seed variance params
             # When disabled, pass "disabled" to make the node a passthrough
@@ -1162,27 +1195,49 @@ def create_interface() -> gr.Blocks:
                                     info="Percentage of prompt protected from noise"
                                 )
                         
-                        # LoRA settings
+                        # LoRA settings (3 slots with enable checkboxes)
                         with gr.Accordion("🎨 LoRA", open=False):
+                            # LoRA 1
                             with gr.Row():
-                                use_lora = gr.Checkbox(label="Enable", value=False, scale=0, min_width=80)
-                                lora_name = gr.Dropdown(
-                                    label="Model",
-                                    show_label=False,
-                                    container=False,
+                                lora1_enabled = gr.Checkbox(label="", value=False, scale=0, min_width=30)
+                                lora1_name = gr.Dropdown(
+                                    label="LoRA 1",
                                     choices=models["lora"],
                                     value=None,
                                     interactive=True,
                                     scale=3,
                                     allow_custom_value=True
                                 )
-                                refresh_loras_btn = gr.Button("🔄", size="sm", scale=0, min_width=40)
-                            with gr.Row():                              
-                                lora_strength = gr.Slider(label="Strength", value=1.0, minimum=0.0, maximum=2.0, step=0.05, scale=2)
+                                lora1_strength = gr.Slider(label="Strength", value=1.0, minimum=0.0, maximum=2.0, step=0.05, scale=1)
+                            # LoRA 2
                             with gr.Row():
-                                open_loras_btn = gr.Button("📂 Open LoRAs Folder", size="sm")
-                            gr.Markdown("*[🔗 Browse CivitAI LoRAs](https://civitai.com/models) — Filter by 'Z-Image' (top-right)*")
-                            gr.Markdown("*[🔗 Character LoRAs (malcolmrey)](https://huggingface.co/spaces/malcolmrey/browser) — Filter by 'ZImage'*")                            
+                                lora2_enabled = gr.Checkbox(label="", value=False, scale=0, min_width=30)
+                                lora2_name = gr.Dropdown(
+                                    label="LoRA 2",
+                                    choices=models["lora"],
+                                    value=None,
+                                    interactive=True,
+                                    scale=3,
+                                    allow_custom_value=True
+                                )
+                                lora2_strength = gr.Slider(label="Strength", value=1.0, minimum=0.0, maximum=2.0, step=0.05, scale=1)
+                            # LoRA 3
+                            with gr.Row():
+                                lora3_enabled = gr.Checkbox(label="", value=False, scale=0, min_width=30)
+                                lora3_name = gr.Dropdown(
+                                    label="LoRA 3",
+                                    choices=models["lora"],
+                                    value=None,
+                                    interactive=True,
+                                    scale=3,
+                                    allow_custom_value=True
+                                )
+                                lora3_strength = gr.Slider(label="Strength", value=1.0, minimum=0.0, maximum=2.0, step=0.05, scale=1)
+                            with gr.Row():
+                                refresh_loras_btn = gr.Button("🔄 Refresh", size="sm", scale=0)
+                                open_loras_btn = gr.Button("📂 Open LoRAs Folder", size="sm", scale=1)
+                            gr.Markdown("*⭐ Tip: Distilled models don't stack LoRAs well. Try lowering strength when using multiple.*")
+                            gr.Markdown("*[🔗 CivitAI LoRAs](https://civitai.com/models) (filter 'Z-Image') · [🔗 Character LoRAs](https://huggingface.co/spaces/malcolmrey/browser) (filter 'ZImage')*")                           
                         
                         # Model selection - auto-open if setup needed
                         with gr.Accordion("🔧 Models", open=show_setup_banner):
@@ -1417,8 +1472,8 @@ Distilled "turbo" models can produce similar images across different seeds, espe
                                     )
                                     upscale_save_to_comfyui = gr.Checkbox(
                                         label="Also save video to ComfyUI output folder",
-                                        value=False,
-                                        info="Video output node will also save directly to comfyui output folder if enabled"
+                                        value=True,
+                                        info="Backup copy saved alongside PNG sequence if enabled"
                                     )
                                     open_comfyui_output_btn = gr.Button("📂 Open ComfyUI Output Folder", size="sm")
                                     
@@ -1766,14 +1821,19 @@ Distilled "turbo" models can produce similar images across different seeds, espe
             outputs=[model_defaults_status]
         )
         
-        # Refresh LoRA list
+        # Refresh LoRA list (updates all 3 dropdowns)
         def refresh_loras():
             loras = scan_models(LORAS_DIR, (".safetensors",))
-            return gr.update(choices=loras, value=loras[0] if loras else None)
+            # Return 3 updates, one for each dropdown (don't change selected value)
+            return (
+                gr.update(choices=loras),
+                gr.update(choices=loras),
+                gr.update(choices=loras)
+            )
         
         refresh_loras_btn.click(
             fn=refresh_loras,
-            outputs=[lora_name]
+            outputs=[lora1_name, lora2_name, lora3_name]
         )
         
         # Update block swap slider max based on DIT model selection
@@ -2046,7 +2106,10 @@ Distilled "turbo" models can produce similar images across different seeds, espe
             steps, seed, randomize_seed, cfg, shift,
             sampler_name, scheduler,
             unet_name, clip_name, vae_name,
-            use_lora, lora_name, lora_strength,
+            # 3 lora slots (enabled, name, strength)
+            lora1_enabled, lora1_name, lora1_strength,
+            lora2_enabled, lora2_name, lora2_strength,
+            lora3_enabled, lora3_name, lora3_strength,
             autosave,
             batch_count,
             # Seed variance params

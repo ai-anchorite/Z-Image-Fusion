@@ -95,7 +95,7 @@
     "inputs": {
       "shift": 3,
       "model": [
-        "52",
+        "61",
         0
       ]
     },
@@ -131,8 +131,8 @@
   },
   "52": {
     "inputs": {
-      "lora_name": "example.safetensors",
-      "strength_model": 1,
+      "lora_name": "none.safetensors",
+      "strength_model": 0,
       "model": [
         "56",
         0
@@ -140,7 +140,7 @@
     },
     "class_type": "LoraLoaderModelOnly",
     "_meta": {
-      "title": "$lora_name, $lora_strength.strength_model"
+      "title": "$lora1_name.lora_name!, $lora1_strength.strength_model!"
     }
   },
   "55": {
@@ -194,6 +194,34 @@
     "class_type": "SeedVarianceEnhancer",
     "_meta": {
       "title": "SeedVariance, $sv_noise_insert.noise_insert, $sv_randomize_percent.randomize_percent, $sv_strength.strength, $sv_steps_switchover_percent.steps_switchover_percent, $sv_seed.seed, $sv_mask_starts_at.mask_starts_at, $sv_mask_percent.mask_percent"
+    }
+  },
+  "60": {
+    "inputs": {
+      "lora_name": "none.safetensors",
+      "strength_model": 0,
+      "model": [
+        "52",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "$lora2_name.lora_name!, $lora2_strength.strength_model!"
+    }
+  },
+  "61": {
+    "inputs": {
+      "lora_name": "none.safetensors",
+      "strength_model": 0,
+      "model": [
+        "60",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "$lora3_name.lora_name!, $lora3_strength.strength_model!"
     }
   }
 }
