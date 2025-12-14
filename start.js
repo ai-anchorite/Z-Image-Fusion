@@ -34,7 +34,7 @@ module.exports = {
         venv: "env",
         path: "app",
         message: [
-          "python app.py"
+          "python app.py {{port}}"
         ],
         on: [{
           // Match Gradio's specific "Running on local URL:" message

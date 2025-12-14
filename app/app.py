@@ -2627,8 +2627,15 @@ def main():
     print(f"Outputs: {OUTPUTS_DIR}")
     print("="*50 + "\n")
     
+    port = 7860
+    if len(sys.argv) > 1:
+        try:
+            port = int(sys.argv[1])
+        except ValueError:
+            print(f"Invalid port specified: {sys.argv[1]}. Using default 7860.")
+
     interface = create_interface()
-    interface.launch(server_name="127.0.0.1", server_port=7860, share=False)
+    interface.launch(server_name="127.0.0.1", server_port=port, share=False)
 
 
 if __name__ == "__main__":
