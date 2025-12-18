@@ -46,7 +46,7 @@ DEFAULT_SEEDVR2_DIT = "seedvr2_ema_3b-Q4_K_M.gguf"
 UPSCALE_BUILTIN_DEFAULTS = {
     "Image Default": {
         "dit_model": DEFAULT_SEEDVR2_DIT,
-        "blocks_to_swap": 36,
+        "blocks_to_swap": 32,
         "attention_mode": "flash_attn",
         "batch_size": 1,
         "uniform_batch": False,
@@ -1159,7 +1159,15 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
             upscale_latent_noise,
         ]
         
-        # Image Upscale - main function returns primary outputs
+        # Hidden state to pass status from main handler to finalize (avoids spinner on status)
+        upscale_pending_status = gr.State(value="")
+        upscale_video_pending_status = gr.State(value="")
+        
+        # Image Upscale - initial handler sets status message and switches tab immediately
+        def upscale_image_start():
+            return "⏳ Upscaling image... (check terminal for details)", gr.Tabs(selected="upscale_image_result")
+        
+        # Image Upscale - main function returns primary outputs (status goes to State, not Textbox)
         async def upscale_image_main(
             input_image, seed, randomize_seed, resolution, max_resolution,
             dit_model, blocks_to_swap, attention_mode,
@@ -1177,15 +1185,18 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
                 input_noise, latent_noise, autosave
             )
             # result = (slider_tuple, status, seed, upscaled_path, original_path, resolution)
-            # Return: slider, seed, hidden states (status/analysis/tabs handled in .then())
+            # Return: slider, seed, status->State, hidden states
             return result[0], result[2], result[1], result[3], result[4], result[5]
         
-        # Secondary handler for status, analysis, and tab switch (no progress spinner)
-        def upscale_image_finalize(status, upscaled_path):
+        # Secondary handler for status, analysis (no progress spinner on these)
+        def upscale_image_finalize(pending_status, upscaled_path):
             analysis = analyze_media(upscaled_path, is_video=False, color_scheme=get_analysis_color())
-            return status, analysis, gr.Tabs(selected="upscale_image_result")
+            return pending_status, analysis
         
         upscale_btn.click(
+            fn=upscale_image_start,
+            outputs=[upscale_status, upscale_output_tabs]
+        ).then(
             fn=upscale_image_main,
             inputs=[
                 upscale_input_image,
@@ -1194,11 +1205,11 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
                 upscale_resolution,
                 upscale_max_resolution,
             ] + upscale_common_inputs,
-            outputs=[upscale_slider, upscale_seed, upscale_status, upscale_result_path, upscale_original_path, upscale_result_resolution]
+            outputs=[upscale_slider, upscale_seed, upscale_pending_status, upscale_result_path, upscale_original_path, upscale_result_resolution]
         ).then(
             fn=upscale_image_finalize,
-            inputs=[upscale_status, upscale_result_path],
-            outputs=[upscale_status, output_image_analysis, upscale_output_tabs]
+            inputs=[upscale_pending_status, upscale_result_path],
+            outputs=[upscale_status, output_image_analysis]
         )
         
         # Video export inputs (before common inputs)
@@ -1212,7 +1223,11 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
             upscale_video_filename,
         ]
         
-        # Video Upscale - main function returns primary outputs
+        # Video Upscale - initial handler sets status message and switches tab immediately
+        def upscale_video_start():
+            return "⏳ Upscaling video... (check terminal for details)", gr.Tabs(selected="upscale_video_result")
+        
+        # Video Upscale - main function returns primary outputs (status goes to State, not Textbox)
         async def upscale_video_main(
             input_video, seed, randomize_seed, resolution,
             video_format, video_crf, video_pix_fmt, prores_profile,
@@ -1234,15 +1249,18 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
                 input_noise, latent_noise
             )
             # result = (video_path, status, seed, output_path)
-            # Return: video, seed, hidden states (status/analysis/tabs handled in .then())
+            # Return: video, seed, status->State, hidden state
             return result[0], result[2], result[1], result[3]
         
-        # Secondary handler for status, analysis, and tab switch (no progress spinner)
-        def upscale_video_finalize(status, output_path):
+        # Secondary handler for status, analysis (no progress spinner on these)
+        def upscale_video_finalize(pending_status, output_path):
             analysis = analyze_media(output_path, is_video=True, color_scheme=get_analysis_color())
-            return status, analysis, gr.Tabs(selected="upscale_video_result")
+            return pending_status, analysis
         
         upscale_video_btn.click(
+            fn=upscale_video_start,
+            outputs=[upscale_status, upscale_output_tabs]
+        ).then(
             fn=upscale_video_main,
             inputs=[
                 upscale_input_video,
@@ -1250,11 +1268,11 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
                 upscale_randomize_seed,
                 upscale_video_resolution,
             ] + upscale_video_export_inputs + upscale_video_common_inputs,
-            outputs=[upscale_output_video, upscale_seed, upscale_status, upscale_video_result_path]
+            outputs=[upscale_output_video, upscale_seed, upscale_video_pending_status, upscale_video_result_path]
         ).then(
             fn=upscale_video_finalize,
-            inputs=[upscale_status, upscale_video_result_path],
-            outputs=[upscale_status, output_video_analysis, upscale_output_tabs]
+            inputs=[upscale_video_pending_status, upscale_video_result_path],
+            outputs=[upscale_status, output_video_analysis]
         )
         
         # Video format change handler - show/hide format-specific options

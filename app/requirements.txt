@@ -9,4 +9,5 @@ av==16.0.1
 qwen-vl-utils==0.0.14
 accelerate
 
+imageio==2.37.2
 hf_xet
