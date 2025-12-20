@@ -514,7 +514,6 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
     
     with gr.TabItem(TAB_LABEL, id=TAB_ID) as tab:
         gr.Markdown("## 🧪 Experimental Workflows")
-        gr.Markdown("*Sandbox for testing new workflows before production integration.*")
         
         with gr.Tabs():
             with gr.TabItem("🔍 UpscaleAny", id="upscale_any"):
