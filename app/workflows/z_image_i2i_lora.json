@@ -116,7 +116,7 @@
     "inputs": {
       "shift": 3,
       "model": [
-        "61",
+        "64",
         0
       ]
     },
@@ -225,6 +225,48 @@
     "class_type": "LoraLoaderModelOnly",
     "_meta": {
       "title": "$lora3_name.lora_name!, $lora3_strength.strength_model!"
+    }
+  },
+  "62": {
+    "inputs": {
+      "lora_name": "none.safetensors",
+      "strength_model": 0,
+      "model": [
+        "61",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "$lora4_name.lora_name!, $lora4_strength.strength_model!"
+    }
+  },
+  "63": {
+    "inputs": {
+      "lora_name": "none.safetensors",
+      "strength_model": 0,
+      "model": [
+        "62",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "$lora5_name.lora_name!, $lora5_strength.strength_model!"
+    }
+  },
+  "64": {
+    "inputs": {
+      "lora_name": "none.safetensors",
+      "strength_model": 0,
+      "model": [
+        "63",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "$lora6_name.lora_name!, $lora6_strength.strength_model!"
     }
   }
 }

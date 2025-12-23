@@ -375,6 +375,15 @@ async def experimental_upscale(
     lora3_enabled: bool = False,
     lora3_name: str = None,
     lora3_strength: float = 1.0,
+    lora4_enabled: bool = False,
+    lora4_name: str = None,
+    lora4_strength: float = 1.0,
+    lora5_enabled: bool = False,
+    lora5_name: str = None,
+    lora5_strength: float = 1.0,
+    lora6_enabled: bool = False,
+    lora6_name: str = None,
+    lora6_strength: float = 1.0,
 ):
     """Execute single image upscale workflow. Yields (slider_tuple, status, seed, result_path)."""
     from modules.lora_ui import get_lora_params
@@ -391,6 +400,9 @@ async def experimental_upscale(
         lora1_enabled, lora1_name, lora1_strength,
         lora2_enabled, lora2_name, lora2_strength,
         lora3_enabled, lora3_name, lora3_strength,
+        lora4_enabled, lora4_name, lora4_strength,
+        lora5_enabled, lora5_name, lora5_strength,
+        lora6_enabled, lora6_name, lora6_strength,
     )
     
     result_path, status_msg, duration = await experimental_upscale_single(
@@ -441,6 +453,15 @@ async def experimental_upscale_batch(
     lora3_enabled: bool = False,
     lora3_name: str = None,
     lora3_strength: float = 1.0,
+    lora4_enabled: bool = False,
+    lora4_name: str = None,
+    lora4_strength: float = 1.0,
+    lora5_enabled: bool = False,
+    lora5_name: str = None,
+    lora5_strength: float = 1.0,
+    lora6_enabled: bool = False,
+    lora6_name: str = None,
+    lora6_strength: float = 1.0,
 ):
     """Execute batch upscale workflow. Yields (gallery_images, status, seed)."""
     global _cancel_batch
@@ -458,6 +479,9 @@ async def experimental_upscale_batch(
         lora1_enabled, lora1_name, lora1_strength,
         lora2_enabled, lora2_name, lora2_strength,
         lora3_enabled, lora3_name, lora3_strength,
+        lora4_enabled, lora4_name, lora4_strength,
+        lora5_enabled, lora5_name, lora5_strength,
+        lora6_enabled, lora6_name, lora6_strength,
     )
     
     results = []

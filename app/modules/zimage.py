@@ -610,10 +610,13 @@ async def generate_image(
     sampler_name: str, scheduler: str,
     # model params
     unet_name: str, clip_name: str, vae_name: str,
-    # lora params (3 slots with enable flags)
+    # lora params (6 slots with enable flags)
     lora1_enabled: bool, lora1_name: str, lora1_strength: float,
     lora2_enabled: bool, lora2_name: str, lora2_strength: float,
     lora3_enabled: bool, lora3_name: str, lora3_strength: float,
+    lora4_enabled: bool, lora4_name: str, lora4_strength: float,
+    lora5_enabled: bool, lora5_name: str, lora5_strength: float,
+    lora6_enabled: bool, lora6_name: str, lora6_strength: float,
     # output params
     autosave: bool,
     # batch params
@@ -717,15 +720,21 @@ async def generate_image(
                 params["megapixels"] = megapixels
                 params["denoise"] = denoise
             
-            # Add lora params (3 slots - use dummy lora with strength 0 when disabled)
+            # Add lora params (6 slots - use dummy lora with strength 0 when disabled)
             params["lora1_name"] = lora1_name if (lora1_enabled and lora1_name) else DUMMY_LORA
             params["lora1_strength"] = lora1_strength if (lora1_enabled and lora1_name) else 0
             params["lora2_name"] = lora2_name if (lora2_enabled and lora2_name) else DUMMY_LORA
             params["lora2_strength"] = lora2_strength if (lora2_enabled and lora2_name) else 0
             params["lora3_name"] = lora3_name if (lora3_enabled and lora3_name) else DUMMY_LORA
             params["lora3_strength"] = lora3_strength if (lora3_enabled and lora3_name) else 0
+            params["lora4_name"] = lora4_name if (lora4_enabled and lora4_name) else DUMMY_LORA
+            params["lora4_strength"] = lora4_strength if (lora4_enabled and lora4_name) else 0
+            params["lora5_name"] = lora5_name if (lora5_enabled and lora5_name) else DUMMY_LORA
+            params["lora5_strength"] = lora5_strength if (lora5_enabled and lora5_name) else 0
+            params["lora6_name"] = lora6_name if (lora6_enabled and lora6_name) else DUMMY_LORA
+            params["lora6_strength"] = lora6_strength if (lora6_enabled and lora6_name) else 0
             
-            # Debug: log lora params
+            # Debug: log lora params (first 3 for brevity)
             logger.info(f"LoRA params: lora1={params['lora1_name']} ({params['lora1_strength']}), lora2={params['lora2_name']} ({params['lora2_strength']}), lora3={params['lora3_name']} ({params['lora3_strength']})")
             
             # Add seed variance params
@@ -985,49 +994,11 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
                             info="Percentage of prompt protected from noise"
                         )
                 
-                # LoRA settings (3 slots with enable checkboxes)
-                with gr.Accordion("🎨 LoRA", open=False):
-                    # LoRA 1
-                    with gr.Row():
-                        lora1_enabled = gr.Checkbox(label="", value=False, scale=0, min_width=30)
-                        lora1_name = gr.Dropdown(
-                            label="LoRA 1",
-                            choices=models["lora"],
-                            value=None,
-                            interactive=True,
-                            scale=3,
-                            allow_custom_value=True
-                        )
-                        lora1_strength = gr.Slider(label="Strength", value=1.0, minimum=0.0, maximum=2.0, step=0.05, scale=1)
-                    # LoRA 2
-                    with gr.Row():
-                        lora2_enabled = gr.Checkbox(label="", value=False, scale=0, min_width=30)
-                        lora2_name = gr.Dropdown(
-                            label="LoRA 2",
-                            choices=models["lora"],
-                            value=None,
-                            interactive=True,
-                            scale=3,
-                            allow_custom_value=True
-                        )
-                        lora2_strength = gr.Slider(label="Strength", value=1.0, minimum=0.0, maximum=2.0, step=0.05, scale=1)
-                    # LoRA 3
-                    with gr.Row():
-                        lora3_enabled = gr.Checkbox(label="", value=False, scale=0, min_width=30)
-                        lora3_name = gr.Dropdown(
-                            label="LoRA 3",
-                            choices=models["lora"],
-                            value=None,
-                            interactive=True,
-                            scale=3,
-                            allow_custom_value=True
-                        )
-                        lora3_strength = gr.Slider(label="Strength", value=1.0, minimum=0.0, maximum=2.0, step=0.05, scale=1)
-                    with gr.Row():
-                        refresh_loras_btn = gr.Button("🔄 Refresh", size="sm", scale=0)
-                        open_loras_btn = gr.Button("📂 Open LoRAs Folder", size="sm", scale=1)
-                    gr.Markdown("*⭐ Tip: Distilled models don't stack LoRAs well. Try lowering strength when using multiple.*")
-                    gr.Markdown("*[🔗 CivitAI LoRAs](https://civitai.com/models) (filter 'Z-Image') · [🔗 Character LoRAs](https://huggingface.co/spaces/malcolmrey/browser) (filter 'ZImage')*")
+                # LoRA settings (6 slots with progressive reveal via lora_ui module)
+                from modules.lora_ui import create_lora_ui, setup_lora_handlers, get_lora_inputs
+                lora_components = create_lora_ui(loras_dir, accordion_open=False, initial_visible=1)
+                # Add CivitAI links after the accordion (inside the column context)
+                gr.Markdown("*[🔗 CivitAI LoRAs](https://civitai.com/models) (filter 'Z-Image') · [🔗 Character LoRAs](https://huggingface.co/spaces/malcolmrey/browser) (filter 'ZImage')*")
                 
                 # Model selection - auto-open if setup needed
                 with gr.Accordion("🔧 Models", open=show_setup_banner):
@@ -1234,18 +1205,8 @@ Distilled "turbo" models can produce similar images across different seeds, espe
             sv_seed=sv_seed,
             sv_mask_starts_at=sv_mask_starts_at,
             sv_mask_percent=sv_mask_percent,
-            # LoRA
-            lora1_enabled=lora1_enabled,
-            lora1_name=lora1_name,
-            lora1_strength=lora1_strength,
-            lora2_enabled=lora2_enabled,
-            lora2_name=lora2_name,
-            lora2_strength=lora2_strength,
-            lora3_enabled=lora3_enabled,
-            lora3_name=lora3_name,
-            lora3_strength=lora3_strength,
-            refresh_loras_btn=refresh_loras_btn,
-            open_loras_btn=open_loras_btn,
+            # LoRA (using lora_ui module)
+            lora_components=lora_components,
             # Models
             use_gguf=use_gguf,
             show_all_models=show_all_models,
@@ -1342,17 +1303,8 @@ def _setup_event_handlers(
     sv_seed = components["sv_seed"]
     sv_mask_starts_at = components["sv_mask_starts_at"]
     sv_mask_percent = components["sv_mask_percent"]
-    lora1_enabled = components["lora1_enabled"]
-    lora1_name = components["lora1_name"]
-    lora1_strength = components["lora1_strength"]
-    lora2_enabled = components["lora2_enabled"]
-    lora2_name = components["lora2_name"]
-    lora2_strength = components["lora2_strength"]
-    lora3_enabled = components["lora3_enabled"]
-    lora3_name = components["lora3_name"]
-    lora3_strength = components["lora3_strength"]
-    refresh_loras_btn = components["refresh_loras_btn"]
-    open_loras_btn = components["open_loras_btn"]
+    # LoRA components from lora_ui module
+    lora_components = components["lora_components"]
     use_gguf = components["use_gguf"]
     show_all_models = components["show_all_models"]
     unet_name = components["unet_name"]
@@ -1526,20 +1478,10 @@ def _setup_event_handlers(
         outputs=[model_defaults_status]
     )
     
-    # Refresh LoRA list (updates all 3 dropdowns)
-    def refresh_loras():
-        loras = scan_models(loras_dir, (".safetensors",))
-        # Return 3 updates, one for each dropdown (don't change selected value)
-        return (
-            gr.update(choices=loras),
-            gr.update(choices=loras),
-            gr.update(choices=loras)
-        )
-    
-    refresh_loras_btn.click(
-        fn=refresh_loras,
-        outputs=[lora1_name, lora2_name, lora3_name]
-    )
+    # Set up LoRA handlers using lora_ui module
+    from modules.lora_ui import setup_lora_handlers, get_lora_inputs
+    setup_lora_handlers(lora_components, loras_dir)
+    lora_inputs = get_lora_inputs(lora_components)
     
     # Metadata reader handlers
     # Store extracted metadata for use by buttons
@@ -1580,9 +1522,9 @@ def _setup_event_handlers(
         Only applies values that are valid for the current setup (e.g., installed LoRAs,
         available samplers/schedulers).
         """
-        # 19 outputs: prompt, seed, randomize_seed, steps, cfg, shift, sampler, scheduler, width, height,
-        #             lora1 (enabled, name, strength), lora2, lora3
-        no_update = [gr.update()] * 19
+        # 28 outputs: prompt, seed, randomize_seed, steps, cfg, shift, sampler, scheduler, width, height,
+        #             lora1-6 (enabled, name, strength) = 18 lora outputs
+        no_update = [gr.update()] * 28
         
         if not metadata:
             return no_update
@@ -1591,9 +1533,9 @@ def _setup_event_handlers(
         prompt_text = metadata.get("prompt_text", "")
         loras_from_meta = params.get("loras", [])
         
-        # Build LoRA updates (3 slots) - only apply if LoRA exists locally
+        # Build LoRA updates (6 slots) - only apply if LoRA exists locally
         lora_updates = []
-        for i in range(3):
+        for i in range(6):
             if i < len(loras_from_meta):
                 lora = loras_from_meta[i]
                 lora_name = lora["name"]
@@ -1654,14 +1596,17 @@ def _setup_event_handlers(
             *lora_updates
         )
     
+    # Build lora output components list for metadata apply
+    lora_output_components = []
+    for slot in lora_components.slots:
+        lora_output_components.extend([slot.enabled, slot.name, slot.strength])
+    
     meta_to_settings_btn.click(
         fn=apply_settings_from_metadata,
         inputs=[extracted_metadata],
         outputs=[
             prompt, seed, randomize_seed, steps, cfg, shift, sampler_name, scheduler, width, height,
-            lora1_enabled, lora1_name, lora1_strength,
-            lora2_enabled, lora2_name, lora2_strength,
-            lora3_enabled, lora3_name, lora3_strength,
+            *lora_output_components
         ]
     )
     
@@ -1671,10 +1616,8 @@ def _setup_event_handlers(
         steps, seed, randomize_seed, cfg, shift,
         sampler_name, scheduler,
         unet_name, clip_name, vae_name,
-        # 3 lora slots (enabled, name, strength)
-        lora1_enabled, lora1_name, lora1_strength,
-        lora2_enabled, lora2_name, lora2_strength,
-        lora3_enabled, lora3_name, lora3_strength,
+        # 6 lora slots (enabled, name, strength) via lora_inputs
+        *lora_inputs,
         autosave,
         batch_count,
         # Seed variance params
@@ -1809,7 +1752,6 @@ def _setup_event_handlers(
     open_folder_btn.click(fn=open_outputs_folder)
     
     # Model folder buttons
-    open_loras_btn.click(fn=lambda: open_folder(loras_dir))
     open_diffusion_btn.click(fn=lambda: open_folder(diffusion_dir))
     open_te_btn.click(fn=lambda: open_folder(text_encoders_dir))
     open_vae_btn.click(fn=lambda: open_folder(vae_dir))

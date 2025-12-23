@@ -2,8 +2,8 @@
 LoRA UI Components
 
 Reusable Gradio components for LoRA selection across modules.
-Provides a consistent UI pattern for 3-slot LoRA selection with
-enable checkboxes, dropdowns, and strength sliders.
+Provides a consistent UI pattern for 6-slot LoRA selection with
+enable checkboxes, dropdowns, strength sliders, and progressive reveal.
 """
 
 import logging
@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 # Dummy lora filename (used when lora disabled - strength 0 bypasses it)
 DUMMY_LORA = "none.safetensors"
+
+# Maximum number of LoRA slots
+MAX_LORA_SLOTS = 6
 
 
 def scan_loras(loras_dir: Path) -> list:
@@ -65,32 +68,35 @@ def open_folder(folder_path: Path):
 
 
 @dataclass
+class LoraSlot:
+    """Container for a single LoRA slot's UI components."""
+    row: gr.Row  # Container row for visibility control
+    enabled: gr.Checkbox
+    name: gr.Dropdown
+    strength: gr.Slider
+
+
+@dataclass
 class LoraComponents:
     """Container for LoRA UI components returned by create_lora_ui."""
-    # LoRA 1
-    lora1_enabled: gr.Checkbox
-    lora1_name: gr.Dropdown
-    lora1_strength: gr.Slider
-    # LoRA 2
-    lora2_enabled: gr.Checkbox
-    lora2_name: gr.Dropdown
-    lora2_strength: gr.Slider
-    # LoRA 3
-    lora3_enabled: gr.Checkbox
-    lora3_name: gr.Dropdown
-    lora3_strength: gr.Slider
+    # All 6 LoRA slots
+    slots: list  # List of LoraSlot objects
     # Buttons
+    add_btn: gr.Button
     refresh_btn: gr.Button
     open_folder_btn: gr.Button
+    # State tracking visible count
+    visible_count: gr.State
 
 
-def create_lora_ui(loras_dir: Path, accordion_open: bool = False) -> LoraComponents:
+def create_lora_ui(loras_dir: Path, accordion_open: bool = False, initial_visible: int = 1) -> LoraComponents:
     """
-    Create the LoRA accordion UI with 3 slots.
+    Create the LoRA accordion UI with 6 slots and progressive reveal.
     
     Args:
         loras_dir: Path to the loras directory
         accordion_open: Whether the accordion should be open by default
+        initial_visible: Number of LoRA slots visible initially (1-6)
         
     Returns:
         LoraComponents dataclass with all UI components
@@ -101,64 +107,65 @@ def create_lora_ui(loras_dir: Path, accordion_open: bool = False) -> LoraCompone
     # Scan available loras
     loras = scan_loras(loras_dir)
     
+    # Clamp initial visible
+    initial_visible = max(1, min(initial_visible, MAX_LORA_SLOTS))
+    
+    slots = []
+    
     with gr.Accordion("🎨 LoRA", open=accordion_open):
-        # LoRA 1
-        with gr.Row():
-            lora1_enabled = gr.Checkbox(label="", value=False, scale=0, min_width=30)
-            lora1_name = gr.Dropdown(
-                label="LoRA 1",
-                choices=loras,
-                value=None,
-                interactive=True,
-                scale=3,
-                allow_custom_value=True
-            )
-            lora1_strength = gr.Slider(label="Strength", value=1.0, minimum=0.0, maximum=2.0, step=0.05, scale=1)
+        # Default strengths per slot - decreasing for stacking
+        default_strengths = [1.0, 0.5, 0.5, 0.25, 0.25, 0.25]
         
-        # LoRA 2
-        with gr.Row():
-            lora2_enabled = gr.Checkbox(label="", value=False, scale=0, min_width=30)
-            lora2_name = gr.Dropdown(
-                label="LoRA 2",
-                choices=loras,
-                value=None,
-                interactive=True,
-                scale=3,
-                allow_custom_value=True
-            )
-            lora2_strength = gr.Slider(label="Strength", value=1.0, minimum=0.0, maximum=2.0, step=0.05, scale=1)
+        # Create 6 LoRA slots
+        for i in range(1, MAX_LORA_SLOTS + 1):
+            # First slot always visible, others based on initial_visible
+            is_visible = i <= initial_visible
+            default_strength = default_strengths[i - 1]
+            
+            with gr.Row(visible=is_visible) as row:
+                enabled = gr.Checkbox(label="", value=False, scale=0, min_width=30)
+                name = gr.Dropdown(
+                    label=f"LoRA {i}",
+                    choices=loras,
+                    value=None,
+                    interactive=True,
+                    scale=3,
+                    allow_custom_value=True
+                )
+                strength = gr.Slider(
+                    label="Strength",
+                    value=default_strength,
+                    minimum=-2.0,
+                    maximum=2.0,
+                    step=0.05,
+                    scale=1
+                )
+            
+            slots.append(LoraSlot(row=row, enabled=enabled, name=name, strength=strength))
         
-        # LoRA 3
-        with gr.Row():
-            lora3_enabled = gr.Checkbox(label="", value=False, scale=0, min_width=30)
-            lora3_name = gr.Dropdown(
-                label="LoRA 3",
-                choices=loras,
-                value=None,
-                interactive=True,
-                scale=3,
-                allow_custom_value=True
-            )
-            lora3_strength = gr.Slider(label="Strength", value=1.0, minimum=0.0, maximum=2.0, step=0.05, scale=1)
+        # Add LoRA button - hidden when all 6 are visible
+        add_btn = gr.Button(
+            "➕ Add LoRA", 
+            size="sm", 
+            variant="secondary",
+            visible=(initial_visible < MAX_LORA_SLOTS)
+        )
         
         with gr.Row():
             refresh_btn = gr.Button("🔄 Refresh", size="sm", scale=0)
             open_folder_btn = gr.Button("📂 Open LoRAs Folder", size="sm", scale=1)
         
         gr.Markdown("*⭐ Tip: Distilled models don't stack LoRAs well. Try lowering strength when using multiple.*")
+        
+        # State to track how many slots are visible
+        visible_count = gr.State(value=initial_visible)
     
     return LoraComponents(
-        lora1_enabled=lora1_enabled,
-        lora1_name=lora1_name,
-        lora1_strength=lora1_strength,
-        lora2_enabled=lora2_enabled,
-        lora2_name=lora2_name,
-        lora2_strength=lora2_strength,
-        lora3_enabled=lora3_enabled,
-        lora3_name=lora3_name,
-        lora3_strength=lora3_strength,
+        slots=slots,
+        add_btn=add_btn,
         refresh_btn=refresh_btn,
         open_folder_btn=open_folder_btn,
+        visible_count=visible_count,
     )
 
 
@@ -170,27 +177,45 @@ def setup_lora_handlers(lora_components: LoraComponents, loras_dir: Path):
         lora_components: LoraComponents from create_lora_ui
         loras_dir: Path to the loras directory
     """
-    # Refresh button - updates all 3 dropdowns
+    slots = lora_components.slots
+    
+    # Refresh button - updates all 6 dropdowns
     def refresh_loras():
         loras = scan_loras(loras_dir)
-        return (
-            gr.update(choices=loras),
-            gr.update(choices=loras),
-            gr.update(choices=loras)
-        )
+        return tuple(gr.update(choices=loras) for _ in range(MAX_LORA_SLOTS))
     
     lora_components.refresh_btn.click(
         fn=refresh_loras,
-        outputs=[
-            lora_components.lora1_name,
-            lora_components.lora2_name,
-            lora_components.lora3_name
-        ]
+        outputs=[slot.name for slot in slots]
     )
     
     # Open folder button
     lora_components.open_folder_btn.click(
         fn=lambda: open_folder(loras_dir)
+    )
+    
+    # Add LoRA button - reveals next hidden slot
+    def add_lora_slot(current_count):
+        new_count = min(current_count + 1, MAX_LORA_SLOTS)
+        
+        # Build visibility updates for all 6 rows
+        row_updates = []
+        for i in range(1, MAX_LORA_SLOTS + 1):
+            row_updates.append(gr.update(visible=(i <= new_count)))
+        
+        # Hide add button when all slots visible
+        add_btn_visible = new_count < MAX_LORA_SLOTS
+        
+        return (new_count, gr.update(visible=add_btn_visible), *row_updates)
+    
+    lora_components.add_btn.click(
+        fn=add_lora_slot,
+        inputs=[lora_components.visible_count],
+        outputs=[
+            lora_components.visible_count,
+            lora_components.add_btn,
+            *[slot.row for slot in slots]
+        ]
     )
 
 
@@ -198,20 +223,35 @@ def get_lora_params(
     lora1_enabled: bool, lora1_name: str, lora1_strength: float,
     lora2_enabled: bool, lora2_name: str, lora2_strength: float,
     lora3_enabled: bool, lora3_name: str, lora3_strength: float,
+    lora4_enabled: bool = False, lora4_name: str = None, lora4_strength: float = 1.0,
+    lora5_enabled: bool = False, lora5_name: str = None, lora5_strength: float = 1.0,
+    lora6_enabled: bool = False, lora6_name: str = None, lora6_strength: float = 1.0,
 ) -> dict:
     """
     Build LoRA params dict for workflow execution.
     
-    Returns dict with lora1_name, lora1_strength, lora2_name, etc.
+    Returns dict with lora1_name, lora1_strength, lora2_name, etc. for all 6 slots.
     Uses DUMMY_LORA with strength 0 for disabled slots.
     """
+    def get_slot_params(enabled, name, strength):
+        if enabled and name:
+            return name, strength
+        return DUMMY_LORA, 0
+    
+    l1_name, l1_str = get_slot_params(lora1_enabled, lora1_name, lora1_strength)
+    l2_name, l2_str = get_slot_params(lora2_enabled, lora2_name, lora2_strength)
+    l3_name, l3_str = get_slot_params(lora3_enabled, lora3_name, lora3_strength)
+    l4_name, l4_str = get_slot_params(lora4_enabled, lora4_name, lora4_strength)
+    l5_name, l5_str = get_slot_params(lora5_enabled, lora5_name, lora5_strength)
+    l6_name, l6_str = get_slot_params(lora6_enabled, lora6_name, lora6_strength)
+    
     return {
-        "lora1_name": lora1_name if (lora1_enabled and lora1_name) else DUMMY_LORA,
-        "lora1_strength": lora1_strength if (lora1_enabled and lora1_name) else 0,
-        "lora2_name": lora2_name if (lora2_enabled and lora2_name) else DUMMY_LORA,
-        "lora2_strength": lora2_strength if (lora2_enabled and lora2_name) else 0,
-        "lora3_name": lora3_name if (lora3_enabled and lora3_name) else DUMMY_LORA,
-        "lora3_strength": lora3_strength if (lora3_enabled and lora3_name) else 0,
+        "lora1_name": l1_name, "lora1_strength": l1_str,
+        "lora2_name": l2_name, "lora2_strength": l2_str,
+        "lora3_name": l3_name, "lora3_strength": l3_str,
+        "lora4_name": l4_name, "lora4_strength": l4_str,
+        "lora5_name": l5_name, "lora5_strength": l5_str,
+        "lora6_name": l6_name, "lora6_strength": l6_str,
     }
 
 
@@ -220,15 +260,9 @@ def get_lora_inputs(lora_components: LoraComponents) -> list:
     Get list of LoRA input components for use in gr.Button.click() inputs.
     
     Returns list in order: [enabled1, name1, strength1, enabled2, name2, strength2, ...]
+    for all 6 slots (18 components total).
     """
-    return [
-        lora_components.lora1_enabled,
-        lora_components.lora1_name,
-        lora_components.lora1_strength,
-        lora_components.lora2_enabled,
-        lora_components.lora2_name,
-        lora_components.lora2_strength,
-        lora_components.lora3_enabled,
-        lora_components.lora3_name,
-        lora_components.lora3_strength,
-    ]
+    inputs = []
+    for slot in lora_components.slots:
+        inputs.extend([slot.enabled, slot.name, slot.strength])
+    return inputs
