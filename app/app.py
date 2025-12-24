@@ -24,6 +24,7 @@ from comfykit import ComfyKit
 from modules import SharedServices, SettingsManager, discover_modules
 from modules.prompt_assistant import PromptAssistant
 from modules.system_monitor import SystemMonitor
+from modules.output_gallery import create_output_gallery
 
 # Configure logging
 logging.basicConfig(
@@ -296,6 +297,17 @@ def create_interface(services: SharedServices, theme: Any = None) -> gr.Blocks:
         right: 28px !important;
     }
 
+    /* Shared output gallery - compact when collapsed */
+    #output-gallery-shared {
+        margin-top: 8px;
+    }
+    #output-gallery-shared .thumbnail-item {
+        border-radius: 6px;
+        transition: transform 0.15s ease;
+    }
+    #output-gallery-shared .thumbnail-item:hover {
+        transform: scale(1.02);
+    }
     """
     
     with gr.Blocks(title="Z-Image Turbo", css=css, theme=theme) as interface:
@@ -330,6 +342,30 @@ def create_interface(services: SharedServices, theme: Any = None) -> gr.Blocks:
         
         # Post-load cross-module wiring for image transfer buttons
         _wire_image_transfers(services)
+        
+        # Shared output gallery at the bottom (outside tabs, always visible on generation tabs)
+        output_gallery_components = create_output_gallery(services)
+        logger.info("Created shared output gallery")
+        
+        # Wire up gallery refresh after save operations from tabs
+        _wire_gallery_refresh(services, output_gallery_components)
+        
+        # Hide gallery on settings tabs (llm_settings, app_settings)
+        settings_tabs = {"llm_settings", "app_settings"}
+        gallery_accordion = output_gallery_components["accordion"]
+        
+        def on_tab_change(evt: gr.SelectData):
+            """Hide gallery accordion on settings tabs."""
+            selected_tab = evt.value if hasattr(evt, 'value') else None
+            # evt.value contains the tab label, but we need tab_id
+            # Check if any settings tab label is selected
+            hide_gallery = any(s in str(selected_tab).lower() for s in ["settings", "llm"])
+            return gr.update(visible=not hide_gallery)
+        
+        main_tabs.select(
+            fn=on_tab_change,
+            outputs=[gallery_accordion]
+        )
     
     return interface
 
@@ -435,6 +471,80 @@ def _wire_image_transfers(services: SharedServices):
             logger.info("Wired Experimental Batch -> Upscale image transfer")
     else:
         logger.warning("Failed to wire Experimental -> Upscale (receiver not ready)")
+
+
+def _wire_gallery_refresh(services: SharedServices, gallery_components: dict):
+    """
+    Wire up the shared output gallery send buttons to target tabs.
+    """
+    import gradio as gr
+    
+    selected_info = gallery_components["selected_info"]
+    get_selected_path = gallery_components["get_selected_path"]
+    gallery_status = gallery_components["status"]
+    send_to_upscale_btn = gallery_components["send_to_upscale_btn"]
+    send_to_experimental_btn = gallery_components["send_to_experimental_btn"]
+    
+    image_transfer = services.inter_module.image_transfer
+    main_tabs = services.inter_module.main_tabs
+    
+    # Wire "Send to Upscale" button
+    upscale_receiver = image_transfer.get_receiver("upscale")
+    if upscale_receiver and main_tabs:
+        def send_to_upscale(info_str):
+            img_path = get_selected_path(info_str)
+            if not img_path:
+                return "❌ No image selected", gr.update(), gr.update(), gr.update()
+            return (
+                f"✓ Sent to Upscale",
+                img_path,
+                "✓ Received image",
+                gr.Tabs(selected="upscale")
+            )
+        
+        outputs = [gallery_status, upscale_receiver.input_component]
+        if upscale_receiver.status_component:
+            outputs.append(upscale_receiver.status_component)
+        else:
+            outputs.append(gr.State())
+        outputs.append(main_tabs)
+        
+        send_to_upscale_btn.click(
+            fn=send_to_upscale,
+            inputs=[selected_info],
+            outputs=outputs
+        )
+        logger.info("Wired Output Gallery -> Upscale")
+    
+    # Wire "Send to Experimental" button
+    exp_receiver = image_transfer.get_receiver("experimental")
+    if exp_receiver and main_tabs:
+        def send_to_experimental(info_str):
+            img_path = get_selected_path(info_str)
+            if not img_path:
+                return "❌ No image selected", gr.update(), gr.update(), gr.update()
+            return (
+                f"✓ Sent to Experimental",
+                img_path,
+                "✓ Received image",
+                gr.Tabs(selected="experimental")
+            )
+        
+        outputs = [gallery_status, exp_receiver.input_component]
+        if exp_receiver.status_component:
+            outputs.append(exp_receiver.status_component)
+        else:
+            outputs.append(gr.State())
+        outputs.append(main_tabs)
+        
+        send_to_experimental_btn.click(
+            fn=send_to_experimental,
+            inputs=[selected_info],
+            outputs=outputs
+        )
+        logger.info("Wired Output Gallery -> Experimental")
+    
+    logger.info("Output gallery ready with auto-refresh")
 
 
 # =============================================================================

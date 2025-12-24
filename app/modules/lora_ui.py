@@ -156,6 +156,7 @@ def create_lora_ui(loras_dir: Path, accordion_open: bool = False, initial_visibl
             open_folder_btn = gr.Button("📂 Open LoRAs Folder", size="sm", scale=1)
         
         gr.Markdown("*⭐ Tip: Distilled models don't stack LoRAs well. Try lowering strength when using multiple.*")
+        gr.Markdown("*[🔗 CivitAI LoRAs](https://civitai.com/models) (filter 'Z-Image') · [🔗 Character LoRAs](https://huggingface.co/spaces/malcolmrey/browser) (filter 'ZImage')*")
         
         # State to track how many slots are visible
         visible_count = gr.State(value=initial_visible)

@@ -107,7 +107,7 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
                     value=current_theme,
                     label="UI Theme",
                     info="Requires app restart",
-                    scale=2
+                    scale=1
                 )
                 analysis_color_scheme = gr.Dropdown(
                     label="Analysis Panel Color",
@@ -116,8 +116,22 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
                     scale=1
                 )
             with gr.Row():
-                theme_apply_btn = gr.Button("🎨 Apply Theme & Restart", variant="primary", size="sm")
-                analysis_color_apply_btn = gr.Button("✨ Apply Color", size="sm")
+                theme_apply_btn = gr.Button("🎨 Apply Theme (requires restart)", variant="primary", size="sm")
+                analysis_color_apply_btn = gr.Button("✨ Apply Panel Color", size="sm")
+            
+            gr.Markdown("---")
+            gr.Markdown("**Output Gallery**")
+            with gr.Row():
+                gallery_height = gr.Slider(
+                    label="Gallery Height",
+                    value=services.settings.get("output_gallery_height", 600),
+                    minimum=200,
+                    maximum=800,
+                    step=50,
+                    info="Requires app restart",
+                    scale=1
+                )
+                gallery_height_apply_btn = gr.Button("💾 Save", size="sm", scale=0)
         
         # === Storage Accordion (Output Dir + Temp) ===
         with gr.Accordion("📁 Storage", open=False):
@@ -228,6 +242,17 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
         analysis_color_apply_btn.click(
             fn=on_analysis_color_apply,
             inputs=[analysis_color_scheme],
+            outputs=[app_settings_status]
+        )
+        
+        # Gallery height handler
+        def on_gallery_height_apply(height):
+            services.settings.set("output_gallery_height", int(height))
+            return f"✓ Gallery height set to {int(height)}px. Restart app to apply."
+        
+        gallery_height_apply_btn.click(
+            fn=on_gallery_height_apply,
+            inputs=[gallery_height],
             outputs=[app_settings_status]
         )
         

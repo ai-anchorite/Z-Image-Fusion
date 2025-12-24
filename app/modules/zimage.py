@@ -997,8 +997,6 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
                 # LoRA settings (6 slots with progressive reveal via lora_ui module)
                 from modules.lora_ui import create_lora_ui, setup_lora_handlers, get_lora_inputs
                 lora_components = create_lora_ui(loras_dir, accordion_open=False, initial_visible=1)
-                # Add CivitAI links after the accordion (inside the column context)
-                gr.Markdown("*[🔗 CivitAI LoRAs](https://civitai.com/models) (filter 'Z-Image') · [🔗 Character LoRAs](https://huggingface.co/spaces/malcolmrey/browser) (filter 'ZImage')*")
                 
                 # Model selection - auto-open if setup needed
                 with gr.Accordion("🔧 Models", open=show_setup_banner):
@@ -1626,26 +1624,27 @@ def _setup_event_handlers(
     ]
     
     # Wrapper functions for async generate (async generators)
+    # Returns (gallery, status, seed, selected_image) - selected_image is always None to clear stale selection
     async def generate_t2i(p, w, h, gguf, *args):
-        async for result in generate_image(services, p, "t2i", gguf, w, h, None, 2.0, 0.67, *args):
-            yield result
+        async for gallery, status, seed_val in generate_image(services, p, "t2i", gguf, w, h, None, 2.0, 0.67, *args):
+            yield gallery, status, seed_val, None  # Clear selected_gallery_image on each yield
     
     async def generate_i2i(p, img, mp, dn, gguf, *args):
-        async for result in generate_image(services, p, "i2i", gguf, 1024, 1024, img, mp, dn, *args):
-            yield result
+        async for gallery, status, seed_val in generate_image(services, p, "i2i", gguf, 1024, 1024, img, mp, dn, *args):
+            yield gallery, status, seed_val, None  # Clear selected_gallery_image on each yield
     
-    # T2I generate
+    # T2I generate - clears selected_gallery_image to prevent stale selection bug
     generate_t2i_btn.click(
         fn=generate_t2i,
         inputs=[prompt, width, height] + common_inputs,
-        outputs=[output_gallery, gen_status, seed]
+        outputs=[output_gallery, gen_status, seed, selected_gallery_image]
     )
     
-    # I2I generate
+    # I2I generate - clears selected_gallery_image to prevent stale selection bug
     generate_i2i_btn.click(
         fn=generate_i2i,
         inputs=[prompt, input_image, megapixels, denoise] + common_inputs,
-        outputs=[output_gallery, gen_status, seed]
+        outputs=[output_gallery, gen_status, seed, selected_gallery_image]
     )
     
     # Unload models

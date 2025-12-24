@@ -604,8 +604,8 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
                         
                         # Main parameters
                         with gr.Row():
-                            megapixels = gr.Slider(label="Megapixels", value=1.0, minimum=0.5, maximum=2.0, step=0.1)
-                            scale_by = gr.Slider(label="Scale Factor", value=1.5, minimum=1.1, maximum=2.0, step=0.1)
+                            megapixels = gr.Slider(label="Megapixels", value=1.0, minimum=0.5, maximum=2.0, step=0.1, info="Scales input image while maintaining aspect ratio")
+                            scale_by = gr.Slider(label="Scale Factor", value=1.5, minimum=1.1, maximum=2.0, step=0.1, info="Output upscale multiplier")
                         
                         # Seed controls
                         with gr.Row():
@@ -877,6 +877,20 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
         services.inter_module.register_component("experimental_selected_image", selected_gallery_image)
         services.inter_module.register_component("experimental_single_result", single_result_state)
         services.inter_module.register_component("experimental_status", status)
+        
+        # Register as an image receiver for inter-module transfers (from output gallery etc.)
+        services.inter_module.image_transfer.register_receiver(
+            tab_id=TAB_ID,
+            label=TAB_LABEL,
+            input_component=input_image,
+            status_component=status
+        )
+        
+        # Fallback: check for pending images when tab is selected
+        tab.select(
+            fn=services.inter_module.image_transfer.create_tab_select_handler(TAB_ID),
+            outputs=[input_image, status]
+        )
         
         # System Monitor
         def update_monitor():
