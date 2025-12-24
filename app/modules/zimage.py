@@ -1748,12 +1748,12 @@ def _setup_event_handlers(
     def open_outputs_folder():
         open_folder(services.get_outputs_dir())
     
-    open_folder_btn.click(fn=open_outputs_folder)
+    open_folder_btn.click(fn=open_outputs_folder, outputs=[])
     
-    # Model folder buttons
-    open_diffusion_btn.click(fn=lambda: open_folder(diffusion_dir))
-    open_te_btn.click(fn=lambda: open_folder(text_encoders_dir))
-    open_vae_btn.click(fn=lambda: open_folder(vae_dir))
+    # Model folder buttons - explicit no outputs to prevent re-triggering
+    open_diffusion_btn.click(fn=lambda: open_folder(diffusion_dir), outputs=[])
+    open_te_btn.click(fn=lambda: open_folder(text_encoders_dir), outputs=[])
+    open_vae_btn.click(fn=lambda: open_folder(vae_dir), outputs=[])
     
     # System Monitor 
     def update_monitor():

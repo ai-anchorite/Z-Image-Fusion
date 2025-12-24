@@ -869,7 +869,7 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
         def on_open_folder():
             current_outputs_dir = services.get_outputs_dir()
             open_folder(current_outputs_dir / "experimental")
-        open_folder_btn.click(fn=on_open_folder)
+        open_folder_btn.click(fn=on_open_folder, outputs=[])
         
         # Register components for inter-module transfer (separate buttons for single vs batch)
         services.inter_module.register_component("experimental_single_send_btn", single_send_btn)

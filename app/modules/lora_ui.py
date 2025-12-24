@@ -192,7 +192,8 @@ def setup_lora_handlers(lora_components: LoraComponents, loras_dir: Path):
     
     # Open folder button
     lora_components.open_folder_btn.click(
-        fn=lambda: open_folder(loras_dir)
+        fn=lambda: open_folder(loras_dir),
+        outputs=[]
     )
     
     # Add LoRA button - reveals next hidden slot

@@ -241,7 +241,7 @@ def create_output_gallery(services: "SharedServices") -> dict:
         outputs=[gallery, gallery_status, selected_display, selected_info, current_image_paths]
     )
     
-    open_folder_btn.click(fn=open_outputs_folder)
+    open_folder_btn.click(fn=open_outputs_folder, outputs=[])
     
     # Auto-refresh timer - checks for new images every 5 seconds
     def auto_refresh_check(current_paths):

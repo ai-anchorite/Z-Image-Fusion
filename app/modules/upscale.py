@@ -1336,8 +1336,8 @@ def create_tab(services: "SharedServices") -> gr.TabItem:
         def open_comfyui_folder():
             open_folder(comfyui_output_dir)
         
-        upscale_open_folder_btn.click(fn=open_outputs_folder)
-        open_comfyui_output_btn.click(fn=open_comfyui_folder)
+        upscale_open_folder_btn.click(fn=open_outputs_folder, outputs=[])
+        open_comfyui_output_btn.click(fn=open_comfyui_folder, outputs=[])
         
         # Register as an image receiver for inter-module transfers
         services.inter_module.image_transfer.register_receiver(
